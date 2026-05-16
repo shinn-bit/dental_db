@@ -5,30 +5,38 @@ import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-providers";
 import { appEnv } from "@/lib/env";
 
+function getCredentials() {
+  if (appEnv.awsProfile) {
+    return fromIni({ profile: appEnv.awsProfile });
+  }
+
+  return undefined;
+}
+
 export function createS3Client() {
   return new S3Client({
     region: appEnv.awsRegion,
-    credentials: fromIni({ profile: appEnv.awsProfile })
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
   });
 }
 
 export function createBedrockAgentClient() {
   return new BedrockAgentClient({
     region: appEnv.awsRegion,
-    credentials: fromIni({ profile: appEnv.awsProfile })
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
   });
 }
 
 export function createBedrockAgentRuntimeClient() {
   return new BedrockAgentRuntimeClient({
     region: appEnv.awsRegion,
-    credentials: fromIni({ profile: appEnv.awsProfile })
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
   });
 }
 
 export function createBedrockRuntimeClient() {
   return new BedrockRuntimeClient({
     region: appEnv.awsRegion,
-    credentials: fromIni({ profile: appEnv.awsProfile })
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
   });
 }

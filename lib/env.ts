@@ -1,6 +1,6 @@
 export const appEnv = {
-  awsProfile: process.env.AWS_PROFILE || "dental-dev",
-  awsRegion: process.env.AWS_REGION || "ap-northeast-1",
+  awsProfile: process.env.AWS_PROFILE || "",
+  awsRegion: process.env.APP_AWS_REGION || process.env.AWS_REGION || "ap-northeast-1",
   s3BucketName: process.env.S3_BUCKET_NAME || "",
   s3ManualPrefix: process.env.S3_MANUAL_PREFIX || "manuals/",
   s3MetadataPrefix: process.env.S3_METADATA_PREFIX || "metadata/",
