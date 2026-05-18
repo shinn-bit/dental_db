@@ -326,9 +326,12 @@ export function ManualsManager() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "要約の取得または作成に失敗しました。";
+      setSummaryProcessingId(null);
       setNotice(message);
     } finally {
-      setSummaryProcessingId(null);
+      if (selectedSummary?.id !== file.id) {
+        setSummaryProcessingId(null);
+      }
     }
   }
 
@@ -350,10 +353,12 @@ export function ManualsManager() {
 
       if (nextFile.summaryStatus === "completed") {
         setNotice("要約が完了しました。OCRテキストがある場合はAI同期後にRAG検索にも使われます。");
+        setSummaryProcessingId(null);
         return;
       }
 
       if (nextFile.summaryStatus === "failed") {
+        setSummaryProcessingId(null);
         throw new Error(data.error || "要約処理に失敗しました。");
       }
 
@@ -363,6 +368,7 @@ export function ManualsManager() {
     }
 
     setNotice("OCRまたは要約は継続中です。しばらくしてから要約を再度開いてください。");
+    setSummaryProcessingId(null);
   }
 
   async function saveSummary() {
@@ -685,10 +691,10 @@ export function ManualsManager() {
                       </Button>
                       <Button
                         variant={file.summaryStatus === "completed" ? "secondary" : "primary"}
-                        disabled={summaryProcessingId === file.id}
+                        disabled={summaryProcessingId === file.id || file.summaryStatus === "processing"}
                         onClick={() => openOrCreateSummary(file)}
                       >
-                        {summaryProcessingId === file.id
+                        {summaryProcessingId === file.id || file.summaryStatus === "processing"
                           ? "処理中"
                           : file.summaryStatus === "completed"
                             ? "要約"
@@ -781,6 +787,12 @@ export function ManualsManager() {
                   ? ` / 文字抽出: ${textExtractionStatusLabel(selectedSummary.textExtractionStatus)}`
                   : ""}
               </p>
+              {selectedSummary.summaryStatus === "processing" || summaryProcessingId === selectedSummary.id ? (
+                <p className="mt-1 flex items-center gap-1 text-xs text-[var(--primary-dark)]">
+                  <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
+                  {selectedSummary.textExtractionStatus === "processing" ? "OCR中" : "要約中"}
+                </p>
+              ) : null}
             </div>
             <div className="flex shrink-0 flex-wrap gap-2">
               <Button variant="secondary" onClick={copySummary}>
