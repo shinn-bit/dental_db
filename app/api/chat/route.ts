@@ -12,6 +12,8 @@ type ChatRequest = {
     id?: string;
     fileName?: string;
     s3Key?: string;
+    summaryKey?: string;
+    knowledgeBaseKey?: string;
     extractedTextKey?: string;
   }>;
 };
@@ -26,10 +28,16 @@ export async function POST(request: Request) {
 
   const knowledgeBaseId = requireEnv(appEnv.bedrockKnowledgeBaseId, "BEDROCK_KNOWLEDGE_BASE_ID");
   const modelArn = requireEnv(appEnv.bedrockModelArn, "BEDROCK_MODEL_ARN");
-  const selectedManuals = (body.manuals || []).filter((manual) => manual.fileName || manual.s3Key);
+  const selectedManuals = (body.manuals || []).filter(
+    (manual) => manual.fileName || manual.knowledgeBaseKey || manual.summaryKey || manual.extractedTextKey
+  );
   const sourceUris = selectedManuals
     .flatMap((manual) => [
-      manual.s3Key ? `s3://${appEnv.s3BucketName}/${manual.s3Key}` : "",
+      manual.knowledgeBaseKey
+        ? `s3://${appEnv.s3BucketName}/${manual.knowledgeBaseKey}`
+        : manual.summaryKey
+          ? `s3://${appEnv.s3BucketName}/${manual.summaryKey}`
+          : "",
       manual.extractedTextKey ? `s3://${appEnv.s3BucketName}/${manual.extractedTextKey}` : ""
     ])
     .filter(Boolean);
@@ -37,7 +45,10 @@ export async function POST(request: Request) {
   const manualContext =
     selectedManuals.length > 0
       ? `\n\n対象資料:\n${selectedManuals
-          .map((manual, index) => `${index + 1}. ${manual.fileName || "名称未設定"} (${manual.s3Key || ""})`)
+        .map(
+          (manual, index) =>
+            `${index + 1}. ${manual.fileName || "名称未設定"} (${manual.knowledgeBaseKey || manual.summaryKey || manual.extractedTextKey || ""})`
+        )
           .join("\n")}\n\n上記の対象資料を優先して参照してください。対象資料に該当情報がない場合は、その旨を明記してください。`
       : "";
   const queryText = `${message}${manualContext}`;

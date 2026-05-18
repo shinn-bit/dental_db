@@ -120,6 +120,8 @@ export function ChatPanel() {
             id: manual.id,
             fileName: manual.fileName,
             s3Key: manual.s3Key,
+            summaryKey: manual.summaryKey,
+            knowledgeBaseKey: manual.knowledgeBaseKey,
             extractedTextKey: manual.extractedTextKey
           }))
         })

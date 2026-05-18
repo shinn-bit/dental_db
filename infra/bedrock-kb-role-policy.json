@@ -24,7 +24,9 @@
       ],
       "Resource": [
         "arn:aws:s3:::dental-manuals-dev-392749559673-apne1",
-        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/manuals/*"
+        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/manuals/*",
+        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/summaries/*",
+        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/kb/*"
       ]
     },
     {

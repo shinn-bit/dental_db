@@ -20,6 +20,7 @@ import {
   createExtractedTextS3Key,
   createOcrTextS3Key,
   createTextractInputS3Key,
+  createKnowledgeBaseS3Key,
   createSummaryS3Key,
   type ManualMetadata
 } from "@/lib/manuals";
@@ -212,6 +213,16 @@ async function saveExtractedText(
   };
 }
 
+function createKnowledgeBaseDocument(summary: string) {
+  const normalized = summary
+    .replace(/\r\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+/g, " ")
+    .trim();
+
+  return normalized.slice(0, 1800);
+}
+
 async function generateAndSaveSummary(bucket: string, metadata: ManualMetadata) {
   if (!metadata.extractedTextKey) {
     return metadata;
@@ -229,17 +240,21 @@ async function generateAndSaveSummary(bucket: string, metadata: ManualMetadata) 
 
   const summary = await generateSummary(extractedText.slice(0, 180000));
   const summaryKey = createSummaryS3Key(metadata.id);
+  const knowledgeBaseKey = createKnowledgeBaseS3Key(metadata.id);
   const now = new Date().toISOString();
+  const knowledgeBaseDocument = createKnowledgeBaseDocument(summary || extractedText);
   const nextMetadata: ManualMetadata = {
     ...metadata,
     summary,
     summaryStatus: "completed",
     summaryError: "",
     summaryKey,
+    knowledgeBaseKey,
     summaryUpdatedAt: now
   };
 
   await putS3Text(bucket, summaryKey, summary, "text/markdown; charset=utf-8");
+  await putS3Text(bucket, knowledgeBaseKey, knowledgeBaseDocument, "text/markdown; charset=utf-8");
   return nextMetadata;
 }
 
@@ -360,16 +375,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   const metadata = await getMetadata(id);
   const summaryKey = metadata.summaryKey || createSummaryS3Key(id);
+  const knowledgeBaseKey = metadata.knowledgeBaseKey || createKnowledgeBaseS3Key(id);
   const nextMetadata: ManualMetadata = {
     ...metadata,
     summary,
     summaryStatus: "completed",
     summaryError: "",
     summaryKey,
+    knowledgeBaseKey,
     summaryUpdatedAt: new Date().toISOString()
   };
 
   await putS3Text(bucket, summaryKey, summary, "text/markdown; charset=utf-8");
+  await putS3Text(bucket, knowledgeBaseKey, createKnowledgeBaseDocument(summary), "text/markdown; charset=utf-8");
   await saveMetadata(nextMetadata);
 
   return NextResponse.json({ summary, file: nextMetadata });

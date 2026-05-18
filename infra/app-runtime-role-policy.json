@@ -40,15 +40,39 @@
       "Resource": "*"
     },
     {
+      "Sid": "BedrockKnowledgeBaseChat",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:RetrieveAndGenerate",
+        "bedrock:Retrieve"
+      ],
+      "Resource": [
+        "*",
+        "arn:aws:bedrock:ap-northeast-1:392749559673:knowledge-base/DSRZ1WUOS5"
+      ]
+    },
+    {
       "Sid": "BedrockSummaryGeneration",
       "Effect": "Allow",
       "Action": [
         "bedrock:InvokeModel",
-        "bedrock:InvokeModelWithResponseStream"
+        "bedrock:InvokeModelWithResponseStream",
+        "bedrock:InvokeModel*"
       ],
       "Resource": [
         "arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6",
-        "arn:aws:bedrock:ap-northeast-1::foundation-model/anthropic.claude-sonnet-4-6"
+        "arn:aws:bedrock:ap-northeast-1::foundation-model/anthropic.claude-sonnet-4-6",
+        "arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-sonnet-4-6"
+      ]
+    },
+    {
+      "Sid": "BedrockInferenceProfileRead",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:GetInferenceProfile"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6"
       ]
     },
     {
