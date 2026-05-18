@@ -305,7 +305,6 @@ export function ManualsManager() {
     setSelectedSummary(file);
     setSummaryDraft(file.summary || "");
     setSummaryEditing(false);
-    setNotice("要約処理を開始しています。");
 
     try {
       const method = file.summaryStatus === "completed" ? "GET" : "POST";
@@ -323,7 +322,6 @@ export function ManualsManager() {
       setSummaryEditing(false);
 
       if (nextFile.summaryStatus === "processing") {
-        setNotice("OCRまたは要約をバックグラウンドで処理しています。画面はこのまま開いてください。");
         await pollSummary(nextFile.id);
       }
     } catch (error) {
@@ -811,17 +809,6 @@ export function ManualsManager() {
             </div>
           </div>
           <div className="p-5">
-            {selectedSummary.summaryStatus === "processing" || summaryProcessingId === selectedSummary.id ? (
-              <div className="mb-4 rounded-md border border-[#d9e8e5] bg-[#f4fbfa] px-3 py-2 text-sm text-[#2f4945]">
-                <div className="flex items-center gap-2">
-                  <RefreshCw size={16} className="animate-spin" aria-hidden="true" />
-                  <span>
-                    {selectedSummary.textExtractionStatus === "processing" ? "OCR中" : "要約中"}です。
-                    完了までこのままお待ちください。
-                  </span>
-                </div>
-              </div>
-            ) : null}
             {summaryEditing ? (
               <textarea
                 className="min-h-[520px] w-full resize-y rounded-md border border-[var(--line)] px-4 py-3 text-sm leading-6 outline-none"
