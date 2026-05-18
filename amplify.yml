@@ -6,6 +6,7 @@ frontend:
         - npm ci
     build:
       commands:
+        - env | grep -E '^(APP_|S3_|BEDROCK_)' >> .env.production
         - npm run build
   artifacts:
     baseDirectory: .next

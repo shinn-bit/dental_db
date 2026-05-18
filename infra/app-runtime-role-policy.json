@@ -1,0 +1,54 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ManualBucketObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/manuals/*",
+        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/metadata/*",
+        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/summaries/*"
+      ]
+    },
+    {
+      "Sid": "ListManualMetadata",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::dental-manuals-dev-392749559673-apne1",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "metadata/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "BedrockKnowledgeBaseIngestion",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListIngestionJobs",
+        "bedrock:StartIngestionJob",
+        "bedrock:GetIngestionJob"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockSummaryGeneration",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:InvokeModel",
+        "bedrock:InvokeModelWithResponseStream"
+      ],
+      "Resource": [
+        "arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.amazon.nova-2-lite-v1:0",
+        "arn:aws:bedrock:ap-northeast-1::foundation-model/amazon.nova-2-lite-v1:0"
+      ]
+    }
+  ]
+}

@@ -5,12 +5,10 @@ import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-providers";
 import { appEnv } from "@/lib/env";
 
-function getCredentials() {
-  if (appEnv.awsProfile) {
-    return fromIni({ profile: appEnv.awsProfile });
-  }
+const sharedCredentials = appEnv.awsProfile ? fromIni({ profile: appEnv.awsProfile }) : undefined;
 
-  return undefined;
+function getCredentials() {
+  return sharedCredentials;
 }
 
 export function createS3Client() {

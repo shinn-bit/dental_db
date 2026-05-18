@@ -102,15 +102,17 @@ export function ManualsManager() {
       try {
         const response = await fetch("/api/files", { cache: "no-store" });
         if (!response.ok) {
-          throw new Error("Failed to load files");
+          const data = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(data.error || "S3一覧を読み込めませんでした。");
         }
         const data = (await response.json()) as { files: ManualMetadata[] };
         if (!ignore) {
           setFiles(data.files.map(metadataToManualFile));
         }
-      } catch {
+      } catch (error) {
         if (!ignore) {
-          setNotice("S3一覧を読み込めませんでした。SSO期限やS3設定を確認してください。");
+          const message = error instanceof Error ? error.message : "S3一覧を読み込めませんでした。";
+          setNotice(`${message} SSO期限、IAMロール、S3設定を確認してください。`);
         }
       } finally {
         if (!ignore) {
