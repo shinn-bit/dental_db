@@ -4,6 +4,7 @@ import { NextResponse } from "next/server";
 import { createS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import { createMetadataS3Key, type ManualMetadata } from "@/lib/manuals";
+import { parseS3Json } from "@/lib/s3-json";
 
 async function bodyToString(body: unknown) {
   if (!body || typeof body !== "object" || !("transformToString" in body)) {
@@ -22,7 +23,7 @@ async function getMetadata(id: string) {
     })
   );
   const text = await bodyToString(response.Body);
-  return JSON.parse(text) as ManualMetadata;
+  return parseS3Json<ManualMetadata>(text);
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {

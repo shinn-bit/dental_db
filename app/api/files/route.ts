@@ -9,6 +9,7 @@ import {
   getThumbnailLabel,
   type ManualMetadata
 } from "@/lib/manuals";
+import { parseS3Json } from "@/lib/s3-json";
 
 async function bodyToString(body: unknown) {
   if (!body || typeof body !== "object" || !("transformToString" in body)) {
@@ -41,7 +42,7 @@ export async function GET() {
             })
           );
           const text = await bodyToString(response.Body);
-          return JSON.parse(text) as ManualMetadata;
+          return parseS3Json<ManualMetadata>(text);
         })
     );
 

@@ -24,7 +24,7 @@ import {
   createSummaryS3Key,
   type ManualMetadata
 } from "@/lib/manuals";
-import { getS3Bytes, getS3Text, putS3Text } from "@/lib/s3-json";
+import { getS3Bytes, getS3Text, parseS3Json, putS3Text } from "@/lib/s3-json";
 
 export const runtime = "nodejs";
 
@@ -56,7 +56,7 @@ const MIN_MEANINGFUL_CHARS_PER_PAGE = 20;
 async function getMetadata(id: string) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   const text = await getS3Text(bucket, createMetadataS3Key(appEnv.s3MetadataPrefix, id));
-  return JSON.parse(text) as ManualMetadata;
+  return parseS3Json<ManualMetadata>(text);
 }
 
 async function saveMetadata(metadata: ManualMetadata) {

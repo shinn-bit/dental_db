@@ -17,6 +17,14 @@ export async function bodyToBytes(body: unknown) {
   return (body as { transformToByteArray: () => Promise<Uint8Array> }).transformToByteArray();
 }
 
+export function stripUtf8Bom(text: string) {
+  return text.replace(/^\uFEFF/, "");
+}
+
+export function parseS3Json<T>(text: string) {
+  return JSON.parse(stripUtf8Bom(text)) as T;
+}
+
 export async function getS3Text(bucket: string, key: string) {
   const response = await createS3Client().send(
     new GetObjectCommand({
