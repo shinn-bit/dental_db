@@ -19,6 +19,13 @@ export function createS3Client() {
   });
 }
 
+export function createTextractS3Client() {
+  return new S3Client({
+    region: appEnv.textractRegion,
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
+  });
+}
+
 export function createBedrockAgentClient() {
   return new BedrockAgentClient({
     region: appEnv.awsRegion,
@@ -42,7 +49,7 @@ export function createBedrockRuntimeClient() {
 
 export function createTextractClient() {
   return new TextractClient({
-    region: appEnv.awsRegion,
+    region: appEnv.textractRegion,
     ...(getCredentials() ? { credentials: getCredentials() } : {})
   });
 }

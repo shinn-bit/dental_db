@@ -1,5 +1,5 @@
 import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import {
   GetDocumentTextDetectionCommand,
   StartDocumentTextDetectionCommand
@@ -8,12 +8,18 @@ import { NextResponse } from "next/server";
 import { join } from "path";
 import { PDFParse } from "pdf-parse";
 import { pathToFileURL } from "url";
-import { createBedrockRuntimeClient, createS3Client, createTextractClient } from "@/lib/aws";
+import {
+  createBedrockRuntimeClient,
+  createS3Client,
+  createTextractClient,
+  createTextractS3Client
+} from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import {
   createMetadataS3Key,
   createExtractedTextS3Key,
   createOcrTextS3Key,
+  createTextractInputS3Key,
   createSummaryS3Key,
   type ManualMetadata
 } from "@/lib/manuals";
@@ -64,6 +70,10 @@ async function saveMetadata(metadata: ManualMetadata) {
   );
 }
 
+function getTextractSourceBucket() {
+  return requireEnv(appEnv.textractBucketName, "APP_TEXTRACT_BUCKET_NAME");
+}
+
 function configurePdfWorker() {
   const workerPath = join(
     process.cwd(),
@@ -107,6 +117,23 @@ async function extractTextWithPdfParse(fileBytes: Uint8Array) {
   } finally {
     await parser.destroy();
   }
+}
+
+async function stagePdfForTextract(sourceBucket: string, sourceKey: string, id: string) {
+  const stagingBucket = await getTextractSourceBucket();
+  const fileBytes = await getS3Bytes(sourceBucket, sourceKey);
+  const stagingKey = createTextractInputS3Key(id);
+
+  await createTextractS3Client().send(
+    new PutObjectCommand({
+      Bucket: stagingBucket,
+      Key: stagingKey,
+      Body: fileBytes,
+      ContentType: "application/pdf"
+    })
+  );
+
+  return { bucket: stagingBucket, key: stagingKey };
 }
 
 async function getTextractTextIfReady(jobId: string) {
@@ -181,7 +208,7 @@ async function saveExtractedText(
     textExtractionSource: source,
     extractedTextKey: textKey,
     extractedTextLength: text.length,
-    textractJobId: source === "ocr" ? metadata.textractJobId : ""
+    textractJobId: ""
   };
 }
 
@@ -220,6 +247,8 @@ async function advanceSummaryJob(bucket: string, metadata: ManualMetadata) {
   let nextMetadata = metadata;
 
   if (nextMetadata.textExtractionStatus === "processing" && nextMetadata.textractJobId) {
+    const stagingKey = createTextractInputS3Key(nextMetadata.id);
+    const stagingBucket = getTextractSourceBucket();
     const ocr = await getTextractTextIfReady(nextMetadata.textractJobId);
     if (ocr.status === "IN_PROGRESS") {
       return nextMetadata;
@@ -227,6 +256,17 @@ async function advanceSummaryJob(bucket: string, metadata: ManualMetadata) {
 
     nextMetadata = await saveExtractedText(bucket, nextMetadata, ocr.text, "ocr");
     await saveMetadata(nextMetadata);
+
+    try {
+      await createTextractS3Client().send(
+        new DeleteObjectCommand({
+          Bucket: stagingBucket,
+          Key: stagingKey
+        })
+      );
+    } catch {
+      // OCR staging cleanup is best-effort.
+    }
   }
 
   if (nextMetadata.textExtractionStatus === "completed" && nextMetadata.summaryStatus === "processing") {
@@ -280,7 +320,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ summary: "", file: processingMetadata }, { status: 202 });
     }
 
-    const textractJobId = await startTextractJob(bucket, metadata.s3Key);
+    const staged = await stagePdfForTextract(bucket, metadata.s3Key, metadata.id);
+    const textractJobId = await startTextractJob(staged.bucket, staged.key);
     const nextMetadata: ManualMetadata = {
       ...metadata,
       summaryStatus: "processing",

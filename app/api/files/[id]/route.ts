@@ -1,8 +1,8 @@
 import { DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
-import { createS3Client } from "@/lib/aws";
+import { createS3Client, createTextractS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
-import { createMetadataS3Key, type ManualMetadata } from "@/lib/manuals";
+import { createMetadataS3Key, createTextractInputS3Key, type ManualMetadata } from "@/lib/manuals";
 
 async function bodyToString(body: unknown) {
   if (!body || typeof body !== "object" || !("transformToString" in body)) {
@@ -57,6 +57,15 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       new DeleteObjectCommand({
         Bucket: bucket,
         Key: file.extractedTextKey
+      })
+    );
+  }
+  if (file.textExtractionSource === "ocr") {
+    const textractBucket = requireEnv(appEnv.textractBucketName, "APP_TEXTRACT_BUCKET_NAME");
+    await createTextractS3Client().send(
+      new DeleteObjectCommand({
+        Bucket: textractBucket,
+        Key: createTextractInputS3Key(id)
       })
     );
   }

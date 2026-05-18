@@ -71,3 +71,7 @@ export function createExtractedTextS3Key(id: string) {
 export function createOcrTextS3Key(id: string) {
   return `manuals/ocr-text/${id}.txt`;
 }
+
+export function createTextractInputS3Key(id: string) {
+  return `textract-input/${id}.pdf`;
+}

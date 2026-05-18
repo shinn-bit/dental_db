@@ -49,3 +49,19 @@ export async function putS3Text(bucket: string, key: string, body: string, conte
     })
   );
 }
+
+export async function putS3Bytes(
+  bucket: string,
+  key: string,
+  body: Uint8Array,
+  contentType: string
+) {
+  await createS3Client().send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType
+    })
+  );
+}
