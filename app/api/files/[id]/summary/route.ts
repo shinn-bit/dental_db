@@ -1,10 +1,15 @@
 import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { PutObjectCommand } from "@aws-sdk/client-s3";
+import {
+  GetDocumentTextDetectionCommand,
+  StartDocumentTextDetectionCommand
+} from "@aws-sdk/client-textract";
 import { NextResponse } from "next/server";
+import { setTimeout as sleep } from "node:timers/promises";
 import { join } from "path";
 import { PDFParse } from "pdf-parse";
 import { pathToFileURL } from "url";
-import { createBedrockRuntimeClient, createS3Client } from "@/lib/aws";
+import { createBedrockRuntimeClient, createS3Client, createTextractClient } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import {
   createMetadataS3Key,
@@ -36,6 +41,10 @@ const summaryTemplate = `
 - 箇条書きを適度に使う
 `;
 
+const MIN_EXTRACTED_TEXT_LENGTH = 100;
+const TEXTRACT_POLL_INTERVAL_MS = 2000;
+const TEXTRACT_MAX_POLLS = 90;
+
 async function getMetadata(id: string) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   const text = await getS3Text(bucket, createMetadataS3Key(appEnv.s3MetadataPrefix, id));
@@ -66,6 +75,77 @@ function configurePdfWorker() {
   PDFParse.setWorker(pathToFileURL(workerPath).toString());
 }
 
+async function extractTextWithPdfParse(fileBytes: Uint8Array) {
+  configurePdfWorker();
+  const parser = new PDFParse({ data: Buffer.from(fileBytes) });
+
+  try {
+    const parsed = await parser.getText();
+    return parsed.text.trim();
+  } finally {
+    await parser.destroy();
+  }
+}
+
+async function extractTextWithTextract(bucket: string, key: string) {
+  const textract = createTextractClient();
+  const started = await textract.send(
+    new StartDocumentTextDetectionCommand({
+      DocumentLocation: {
+        S3Object: {
+          Bucket: bucket,
+          Name: key
+        }
+      }
+    })
+  );
+
+  if (!started.JobId) {
+    throw new Error("Textract OCRジョブを開始できませんでした。");
+  }
+
+  for (let attempt = 0; attempt < TEXTRACT_MAX_POLLS; attempt += 1) {
+    await sleep(TEXTRACT_POLL_INTERVAL_MS);
+
+    const lines: string[] = [];
+    let nextToken: string | undefined;
+    let jobStatus: string | undefined;
+    let statusMessage: string | undefined;
+
+    do {
+      const response = await textract.send(
+        new GetDocumentTextDetectionCommand({
+          JobId: started.JobId,
+          NextToken: nextToken
+        })
+      );
+
+      jobStatus = response.JobStatus;
+      statusMessage = response.StatusMessage;
+
+      if (jobStatus === "FAILED" || jobStatus === "PARTIAL_SUCCESS") {
+        throw new Error(statusMessage || `Textract OCRジョブが${jobStatus}で終了しました。`);
+      }
+
+      if (jobStatus === "SUCCEEDED") {
+        lines.push(
+          ...(response.Blocks || [])
+            .filter((block) => block.BlockType === "LINE" && block.Text)
+            .map((block) => block.Text || "")
+        );
+      }
+
+      nextToken = response.NextToken;
+    } while (jobStatus === "SUCCEEDED" && nextToken);
+
+    if (jobStatus === "SUCCEEDED") {
+      return lines.join("\n").trim();
+    }
+  }
+
+  throw new Error("Textract OCRジョブが時間内に完了しませんでした。");
+}
+
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const metadata = await getMetadata(id);
@@ -85,14 +165,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const metadata = await getMetadata(id);
 
   try {
-    configurePdfWorker();
     const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
-    const parser = new PDFParse({ data: Buffer.from(fileBytes) });
-    const parsed = await parser.getText();
-    await parser.destroy();
-    const extractedText = parsed.text.trim();
+    const parsedText = await extractTextWithPdfParse(fileBytes);
+    const extractedText =
+      parsedText.length >= MIN_EXTRACTED_TEXT_LENGTH
+        ? parsedText
+        : await extractTextWithTextract(bucket, metadata.s3Key);
 
-    if (extractedText.length < 100) {
+    if (extractedText.length < MIN_EXTRACTED_TEXT_LENGTH) {
       const nextMetadata: ManualMetadata = {
         ...metadata,
         summaryStatus: "failed",
@@ -102,7 +182,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       await saveMetadata(nextMetadata);
       return NextResponse.json(
         {
-          error: "PDFから十分なテキストを抽出できませんでした。OCR処理が必要です。",
+          error: "OCR後もPDFから十分なテキストを抽出できませんでした。",
           file: nextMetadata
         },
         { status: 422 }

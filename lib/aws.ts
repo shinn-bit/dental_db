@@ -3,6 +3,7 @@ import { BedrockAgentClient } from "@aws-sdk/client-bedrock-agent";
 import { BedrockAgentRuntimeClient } from "@aws-sdk/client-bedrock-agent-runtime";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
 import { fromIni } from "@aws-sdk/credential-providers";
+import { TextractClient } from "@aws-sdk/client-textract";
 import { appEnv } from "@/lib/env";
 
 const sharedCredentials = appEnv.awsProfile ? fromIni({ profile: appEnv.awsProfile }) : undefined;
@@ -34,6 +35,13 @@ export function createBedrockAgentRuntimeClient() {
 
 export function createBedrockRuntimeClient() {
   return new BedrockRuntimeClient({
+    region: appEnv.awsRegion,
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
+  });
+}
+
+export function createTextractClient() {
+  return new TextractClient({
     region: appEnv.awsRegion,
     ...(getCredentials() ? { credentials: getCredentials() } : {})
   });

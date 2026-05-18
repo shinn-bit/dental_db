@@ -31,3 +31,7 @@ APP_AUTH_SECRET=...
 ```
 
 GitHub ActionsなどのCIからAWSを操作する場合は、長期アクセスキーではなくGitHub OIDCで専用IAMロールをAssumeRoleする。
+
+## スキャンPDFのOCR
+
+PDF本文を `pdf-parse` で十分に抽出できない場合は、AWS Textractの `StartDocumentTextDetection` / `GetDocumentTextDetection` にフォールバックする。TextractはS3上のPDFを読むため、Amplify SSR Compute roleにはS3読み取り権限とTextract実行権限の両方が必要。
