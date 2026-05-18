@@ -323,15 +323,13 @@ export function ManualsManager() {
 
       if (nextFile.summaryStatus === "processing") {
         await pollSummary(nextFile.id);
+      } else {
+        setSummaryProcessingId(null);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "要約の取得または作成に失敗しました。";
       setSummaryProcessingId(null);
       setNotice(message);
-    } finally {
-      if (selectedSummary?.id !== file.id) {
-        setSummaryProcessingId(null);
-      }
     }
   }
 
