@@ -42,8 +42,10 @@ const summaryTemplate = `
 `;
 
 const MIN_EXTRACTED_TEXT_LENGTH = 100;
+const MIN_MEANINGFUL_TEXT_LENGTH = 1000;
+const MIN_MEANINGFUL_CHARS_PER_PAGE = 20;
 const TEXTRACT_POLL_INTERVAL_MS = 2000;
-const TEXTRACT_MAX_POLLS = 90;
+const TEXTRACT_MAX_POLLS = 240;
 
 async function getMetadata(id: string) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
@@ -75,13 +77,34 @@ function configurePdfWorker() {
   PDFParse.setWorker(pathToFileURL(workerPath).toString());
 }
 
+function cleanExtractedText(text: string) {
+  return text
+    .replace(/^--\s*\d+\s+of\s+\d+\s*--$/gim, "")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function hasEnoughMeaningfulText(text: string, pageCount?: number) {
+  const compactText = cleanExtractedText(text).replace(/\s+/g, "");
+  const minimumLength = Math.max(
+    MIN_MEANINGFUL_TEXT_LENGTH,
+    (pageCount || 1) * MIN_MEANINGFUL_CHARS_PER_PAGE
+  );
+
+  return compactText.length >= minimumLength;
+}
+
 async function extractTextWithPdfParse(fileBytes: Uint8Array) {
   configurePdfWorker();
   const parser = new PDFParse({ data: Buffer.from(fileBytes) });
 
   try {
     const parsed = await parser.getText();
-    return parsed.text.trim();
+    return {
+      pageCount: parsed.total,
+      text: cleanExtractedText(parsed.text || "")
+    };
   } finally {
     await parser.destroy();
   }
@@ -166,10 +189,10 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   try {
     const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
-    const parsedText = await extractTextWithPdfParse(fileBytes);
+    const parsed = await extractTextWithPdfParse(fileBytes);
     const extractedText =
-      parsedText.length >= MIN_EXTRACTED_TEXT_LENGTH
-        ? parsedText
+      hasEnoughMeaningfulText(parsed.text, parsed.pageCount)
+        ? parsed.text
         : await extractTextWithTextract(bucket, metadata.s3Key);
 
     if (extractedText.length < MIN_EXTRACTED_TEXT_LENGTH) {
