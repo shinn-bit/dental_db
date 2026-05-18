@@ -5,7 +5,6 @@ import {
   StartDocumentTextDetectionCommand
 } from "@aws-sdk/client-textract";
 import { NextResponse } from "next/server";
-import { setTimeout as sleep } from "node:timers/promises";
 import { join } from "path";
 import { PDFParse } from "pdf-parse";
 import { pathToFileURL } from "url";
@@ -13,6 +12,8 @@ import { createBedrockRuntimeClient, createS3Client, createTextractClient } from
 import { appEnv, requireEnv } from "@/lib/env";
 import {
   createMetadataS3Key,
+  createExtractedTextS3Key,
+  createOcrTextS3Key,
   createSummaryS3Key,
   type ManualMetadata
 } from "@/lib/manuals";
@@ -44,8 +45,6 @@ const summaryTemplate = `
 const MIN_EXTRACTED_TEXT_LENGTH = 100;
 const MIN_MEANINGFUL_TEXT_LENGTH = 1000;
 const MIN_MEANINGFUL_CHARS_PER_PAGE = 20;
-const TEXTRACT_POLL_INTERVAL_MS = 2000;
-const TEXTRACT_MAX_POLLS = 240;
 
 async function getMetadata(id: string) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
@@ -110,9 +109,46 @@ async function extractTextWithPdfParse(fileBytes: Uint8Array) {
   }
 }
 
-async function extractTextWithTextract(bucket: string, key: string) {
+async function getTextractTextIfReady(jobId: string) {
   const textract = createTextractClient();
-  const started = await textract.send(
+  const lines: string[] = [];
+  let nextToken: string | undefined;
+  let jobStatus: string | undefined;
+  let statusMessage: string | undefined;
+
+  do {
+    const response = await textract.send(
+      new GetDocumentTextDetectionCommand({
+        JobId: jobId,
+        NextToken: nextToken
+      })
+    );
+
+    jobStatus = response.JobStatus;
+    statusMessage = response.StatusMessage;
+
+    if (jobStatus === "IN_PROGRESS") {
+      return { status: "IN_PROGRESS" as const, text: "" };
+    }
+
+    if (jobStatus === "FAILED" || jobStatus === "PARTIAL_SUCCESS") {
+      throw new Error(statusMessage || `Textract OCRジョブが${jobStatus}で終了しました。`);
+    }
+
+    lines.push(
+      ...(response.Blocks || [])
+        .filter((block) => block.BlockType === "LINE" && block.Text)
+        .map((block) => block.Text || "")
+    );
+
+    nextToken = response.NextToken;
+  } while (nextToken);
+
+  return { status: "SUCCEEDED" as const, text: lines.join("\n").trim() };
+}
+
+async function startTextractJob(bucket: string, key: string) {
+  const response = await createTextractClient().send(
     new StartDocumentTextDetectionCommand({
       DocumentLocation: {
         S3Object: {
@@ -123,58 +159,90 @@ async function extractTextWithTextract(bucket: string, key: string) {
     })
   );
 
-  if (!started.JobId) {
+  if (!response.JobId) {
     throw new Error("Textract OCRジョブを開始できませんでした。");
   }
 
-  for (let attempt = 0; attempt < TEXTRACT_MAX_POLLS; attempt += 1) {
-    await sleep(TEXTRACT_POLL_INTERVAL_MS);
+  return response.JobId;
+}
 
-    const lines: string[] = [];
-    let nextToken: string | undefined;
-    let jobStatus: string | undefined;
-    let statusMessage: string | undefined;
+async function saveExtractedText(
+  bucket: string,
+  metadata: ManualMetadata,
+  text: string,
+  source: "pdf" | "ocr"
+) {
+  const textKey = source === "ocr" ? createOcrTextS3Key(metadata.id) : createExtractedTextS3Key(metadata.id);
+  await putS3Text(bucket, textKey, text, "text/plain; charset=utf-8");
 
-    do {
-      const response = await textract.send(
-        new GetDocumentTextDetectionCommand({
-          JobId: started.JobId,
-          NextToken: nextToken
-        })
-      );
+  return {
+    ...metadata,
+    textExtractionStatus: "completed" as const,
+    textExtractionSource: source,
+    extractedTextKey: textKey,
+    extractedTextLength: text.length,
+    textractJobId: source === "ocr" ? metadata.textractJobId : ""
+  };
+}
 
-      jobStatus = response.JobStatus;
-      statusMessage = response.StatusMessage;
-
-      if (jobStatus === "FAILED" || jobStatus === "PARTIAL_SUCCESS") {
-        throw new Error(statusMessage || `Textract OCRジョブが${jobStatus}で終了しました。`);
-      }
-
-      if (jobStatus === "SUCCEEDED") {
-        lines.push(
-          ...(response.Blocks || [])
-            .filter((block) => block.BlockType === "LINE" && block.Text)
-            .map((block) => block.Text || "")
-        );
-      }
-
-      nextToken = response.NextToken;
-    } while (jobStatus === "SUCCEEDED" && nextToken);
-
-    if (jobStatus === "SUCCEEDED") {
-      return lines.join("\n").trim();
-    }
+async function generateAndSaveSummary(bucket: string, metadata: ManualMetadata) {
+  if (!metadata.extractedTextKey) {
+    return metadata;
   }
 
-  throw new Error("Textract OCRジョブが時間内に完了しませんでした。");
+  const extractedText = await getS3Text(bucket, metadata.extractedTextKey);
+
+  if (extractedText.length < MIN_EXTRACTED_TEXT_LENGTH) {
+    return {
+      ...metadata,
+      summaryStatus: "failed" as const,
+      summaryError: "OCR後もPDFから十分なテキストを抽出できませんでした。"
+    };
+  }
+
+  const summary = await generateSummary(extractedText.slice(0, 180000));
+  const summaryKey = createSummaryS3Key(metadata.id);
+  const now = new Date().toISOString();
+  const nextMetadata: ManualMetadata = {
+    ...metadata,
+    summary,
+    summaryStatus: "completed",
+    summaryError: "",
+    summaryKey,
+    summaryUpdatedAt: now
+  };
+
+  await putS3Text(bucket, summaryKey, summary, "text/markdown; charset=utf-8");
+  return nextMetadata;
+}
+
+async function advanceSummaryJob(bucket: string, metadata: ManualMetadata) {
+  let nextMetadata = metadata;
+
+  if (nextMetadata.textExtractionStatus === "processing" && nextMetadata.textractJobId) {
+    const ocr = await getTextractTextIfReady(nextMetadata.textractJobId);
+    if (ocr.status === "IN_PROGRESS") {
+      return nextMetadata;
+    }
+
+    nextMetadata = await saveExtractedText(bucket, nextMetadata, ocr.text, "ocr");
+    await saveMetadata(nextMetadata);
+  }
+
+  if (nextMetadata.textExtractionStatus === "completed" && nextMetadata.summaryStatus === "processing") {
+    nextMetadata = await generateAndSaveSummary(bucket, nextMetadata);
+    await saveMetadata(nextMetadata);
+  }
+
+  return nextMetadata;
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const metadata = await getMetadata(id);
+  const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
+  const metadata = await advanceSummaryJob(bucket, await getMetadata(id));
 
   if (metadata.summaryKey) {
-    const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
     const summary = await getS3Text(bucket, metadata.summaryKey);
     return NextResponse.json({ summary, file: { ...metadata, summary } });
   }
@@ -188,48 +256,43 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   const metadata = await getMetadata(id);
 
   try {
-    const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
-    const parsed = await extractTextWithPdfParse(fileBytes);
-    const extractedText =
-      hasEnoughMeaningfulText(parsed.text, parsed.pageCount)
-        ? parsed.text
-        : await extractTextWithTextract(bucket, metadata.s3Key);
-
-    if (extractedText.length < MIN_EXTRACTED_TEXT_LENGTH) {
-      const nextMetadata: ManualMetadata = {
-        ...metadata,
-        summaryStatus: "failed",
-        textExtractionStatus: "ocr_required",
-        extractedTextLength: extractedText.length
-      };
-      await saveMetadata(nextMetadata);
-      return NextResponse.json(
-        {
-          error: "OCR後もPDFから十分なテキストを抽出できませんでした。",
-          file: nextMetadata
-        },
-        { status: 422 }
-      );
+    if (metadata.summaryStatus === "processing") {
+      const nextMetadata = await advanceSummaryJob(bucket, metadata);
+      return NextResponse.json({ summary: nextMetadata.summary || "", file: nextMetadata }, { status: 202 });
     }
 
-    const summary = await generateSummary(extractedText.slice(0, 180000));
-    const summaryKey = createSummaryS3Key(id);
-    const now = new Date().toISOString();
+    if (metadata.summaryKey) {
+      const summary = await getS3Text(bucket, metadata.summaryKey);
+      return NextResponse.json({ summary, file: { ...metadata, summary } });
+    }
+
+    const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
+    const parsed = await extractTextWithPdfParse(fileBytes);
+
+    if (hasEnoughMeaningfulText(parsed.text, parsed.pageCount)) {
+      const extractedMetadata = await saveExtractedText(bucket, metadata, parsed.text, "pdf");
+      const processingMetadata: ManualMetadata = {
+        ...extractedMetadata,
+        summaryStatus: "processing",
+        summaryError: ""
+      };
+      await saveMetadata(processingMetadata);
+      return NextResponse.json({ summary: "", file: processingMetadata }, { status: 202 });
+    }
+
+    const textractJobId = await startTextractJob(bucket, metadata.s3Key);
     const nextMetadata: ManualMetadata = {
       ...metadata,
-      summary,
-      summaryStatus: "completed",
+      summaryStatus: "processing",
       summaryError: "",
-      summaryKey,
-      summaryUpdatedAt: now,
-      textExtractionStatus: "completed",
-      extractedTextLength: extractedText.length
+      textExtractionStatus: "processing",
+      textExtractionSource: "ocr",
+      extractedTextLength: 0,
+      textractJobId
     };
 
-    await putS3Text(bucket, summaryKey, summary, "text/markdown; charset=utf-8");
     await saveMetadata(nextMetadata);
-
-    return NextResponse.json({ summary, file: nextMetadata });
+    return NextResponse.json({ summary: "", file: nextMetadata }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "要約作成に失敗しました。";
     const nextMetadata: ManualMetadata = {
@@ -237,7 +300,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       summaryStatus: "failed",
       summaryError: message,
       textExtractionStatus:
-        metadata.textExtractionStatus === "ocr_required" ? "ocr_required" : "failed"
+        metadata.textExtractionStatus === "processing" ? "failed" : metadata.textExtractionStatus
     };
     await saveMetadata(nextMetadata);
     return NextResponse.json({ error: message, file: nextMetadata }, { status: 500 });

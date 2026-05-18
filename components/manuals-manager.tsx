@@ -318,12 +318,50 @@ export function ManualsManager() {
       setSelectedSummary(nextFile);
       setSummaryDraft(data.summary || nextFile.summary || "");
       setSummaryEditing(false);
+
+      if (nextFile.summaryStatus === "processing") {
+        setNotice("OCRまたは要約をバックグラウンドで処理しています。");
+        await pollSummary(nextFile.id);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "要約の取得または作成に失敗しました。";
       setNotice(message);
     } finally {
       setSummaryProcessingId(null);
     }
+  }
+
+  async function pollSummary(fileId: string) {
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 5000));
+
+      const response = await fetch(`/api/files/${fileId}/summary`, { cache: "no-store" });
+      const data = (await response.json()) as { summary?: string; file?: ManualMetadata; error?: string };
+
+      if (!response.ok) {
+        throw new Error(data.error || "要約処理の状態確認に失敗しました。");
+      }
+
+      const nextFile = metadataToManualFile(data.file as ManualMetadata);
+      setFiles((current) => current.map((item) => (item.id === nextFile.id ? nextFile : item)));
+      setSelectedSummary(nextFile);
+      setSummaryDraft(data.summary || nextFile.summary || "");
+
+      if (nextFile.summaryStatus === "completed") {
+        setNotice("要約が完了しました。OCRテキストがある場合はAI同期後にRAG検索にも使われます。");
+        return;
+      }
+
+      if (nextFile.summaryStatus === "failed") {
+        throw new Error(data.error || "要約処理に失敗しました。");
+      }
+
+      const extractionLabel =
+        nextFile.textExtractionStatus === "processing" ? "OCR中" : "要約中";
+      setNotice(`${extractionLabel}です。完了までこの画面で状態を確認します。`);
+    }
+
+    setNotice("OCRまたは要約は継続中です。しばらくしてから要約を再度開いてください。");
   }
 
   async function saveSummary() {
@@ -949,6 +987,9 @@ function summaryStatusLabel(status: ManualMetadata["summaryStatus"]) {
 function textExtractionStatusLabel(status: ManualMetadata["textExtractionStatus"]) {
   if (status === "completed") {
     return "OK";
+  }
+  if (status === "processing") {
+    return "OCR中";
   }
   if (status === "ocr_required") {
     return "OCR推奨";

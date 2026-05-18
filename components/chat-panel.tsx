@@ -119,7 +119,8 @@ export function ChatPanel() {
           manuals: selectedManuals.map((manual) => ({
             id: manual.id,
             fileName: manual.fileName,
-            s3Key: manual.s3Key
+            s3Key: manual.s3Key,
+            extractedTextKey: manual.extractedTextKey
           }))
         })
       });

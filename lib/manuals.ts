@@ -20,8 +20,11 @@ export type ManualMetadata = {
   summaryError?: string;
   summaryKey?: string;
   summaryUpdatedAt?: string;
-  textExtractionStatus?: "not_started" | "completed" | "failed" | "ocr_required";
+  textExtractionStatus?: "not_started" | "processing" | "completed" | "failed" | "ocr_required";
+  textExtractionSource?: "pdf" | "ocr";
+  extractedTextKey?: string;
   extractedTextLength?: number;
+  textractJobId?: string;
   uploadedAt: string;
 };
 
@@ -59,4 +62,12 @@ export function createMetadataS3Key(prefix: string, id: string) {
 
 export function createSummaryS3Key(id: string) {
   return `summaries/${id}.md`;
+}
+
+export function createExtractedTextS3Key(id: string) {
+  return `summaries/extracted-text/${id}.txt`;
+}
+
+export function createOcrTextS3Key(id: string) {
+  return `manuals/ocr-text/${id}.txt`;
 }

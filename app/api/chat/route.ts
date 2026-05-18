@@ -12,6 +12,7 @@ type ChatRequest = {
     id?: string;
     fileName?: string;
     s3Key?: string;
+    extractedTextKey?: string;
   }>;
 };
 
@@ -27,7 +28,10 @@ export async function POST(request: Request) {
   const modelArn = requireEnv(appEnv.bedrockModelArn, "BEDROCK_MODEL_ARN");
   const selectedManuals = (body.manuals || []).filter((manual) => manual.fileName || manual.s3Key);
   const sourceUris = selectedManuals
-    .map((manual) => (manual.s3Key ? `s3://${appEnv.s3BucketName}/${manual.s3Key}` : ""))
+    .flatMap((manual) => [
+      manual.s3Key ? `s3://${appEnv.s3BucketName}/${manual.s3Key}` : "",
+      manual.extractedTextKey ? `s3://${appEnv.s3BucketName}/${manual.extractedTextKey}` : ""
+    ])
     .filter(Boolean);
   const retrievalFilter = createSourceUriFilter(sourceUris);
   const manualContext =

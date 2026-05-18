@@ -84,7 +84,10 @@ export async function POST(request: Request) {
       summaryKey: body.summaryKey || "",
       summaryUpdatedAt: body.summaryUpdatedAt || "",
       textExtractionStatus: body.textExtractionStatus || "not_started",
+      textExtractionSource: body.textExtractionSource,
+      extractedTextKey: body.extractedTextKey || "",
       extractedTextLength: body.extractedTextLength || 0,
+      textractJobId: body.textractJobId || "",
       uploadedAt: body.uploadedAt || new Date().toISOString()
     };
 

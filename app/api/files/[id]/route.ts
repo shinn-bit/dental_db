@@ -44,6 +44,22 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       Key: file.s3Key
     })
   );
+  if (file.summaryKey) {
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: file.summaryKey
+      })
+    );
+  }
+  if (file.extractedTextKey) {
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: file.extractedTextKey
+      })
+    );
+  }
   await s3.send(
     new DeleteObjectCommand({
       Bucket: bucket,
