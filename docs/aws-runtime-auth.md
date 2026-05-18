@@ -27,7 +27,7 @@ S3_MANUAL_PREFIX=manuals/
 S3_METADATA_PREFIX=metadata/
 BEDROCK_KNOWLEDGE_BASE_ID=DSRZ1WUOS5
 BEDROCK_DATA_SOURCE_ID=U64XPQTAS2
-BEDROCK_MODEL_ARN=arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.amazon.nova-2-lite-v1:0
+BEDROCK_MODEL_ARN=arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6
 APP_SHARE_PASSWORD=...
 APP_AUTH_SECRET=...
 ```
