@@ -3,7 +3,7 @@
   "s3Configuration": {
     "bucketArn": "arn:aws:s3:::dental-manuals-dev-392749559673-apne1",
     "inclusionPrefixes": [
-      "manuals/"
+      "kb/"
     ],
     "bucketOwnerAccountId": "392749559673"
   }
