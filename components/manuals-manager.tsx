@@ -315,6 +315,9 @@ export function ManualsManager() {
     try {
       const method = file.summaryStatus === "completed" ? "GET" : "POST";
       const response = await fetch(`/api/files/${file.id}/summary`, { method, cache: "no-store" });
+      if (!response.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("要約APIからJSON以外の応答が返りました。ログイン状態を確認してください。");
+      }
       const data = (await response.json()) as { summary?: string; file?: ManualMetadata; error?: string };
 
       if (!response.ok) {
@@ -349,6 +352,9 @@ export function ManualsManager() {
       await new Promise((resolve) => window.setTimeout(resolve, 5000));
 
       const response = await fetch(`/api/files/${fileId}/summary`, { cache: "no-store" });
+      if (!response.headers.get("content-type")?.includes("application/json")) {
+        throw new Error("要約APIからJSON以外の応答が返りました。ログイン状態を確認してください。");
+      }
       const data = (await response.json()) as { summary?: string; file?: ManualMetadata; error?: string };
 
       if (!response.ok) {

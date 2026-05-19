@@ -346,9 +346,11 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
-  const metadata = await getMetadata(id);
+  let metadata: ManualMetadata | null = null;
 
   try {
+    metadata = await getMetadata(id);
+
     if (metadata.summaryStatus === "processing") {
       return NextResponse.json({ summary: metadata.summary || "", file: metadata }, { status: 202 });
     }
@@ -373,6 +375,16 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ summary: "", file: nextMetadata }, { status: 202 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "要約作成に失敗しました。";
+    console.error("summary start failed", {
+      fileId: id,
+      errorName: error instanceof Error ? error.name : "UnknownError",
+      errorMessage: message
+    });
+
+    if (!metadata) {
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+
     const nextMetadata: ManualMetadata = {
       ...metadata,
       summaryStatus: "failed",
@@ -380,7 +392,17 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       textExtractionStatus:
         metadata.textExtractionStatus === "processing" ? "failed" : metadata.textExtractionStatus
     };
-    await saveMetadata(nextMetadata);
+
+    try {
+      await saveMetadata(nextMetadata);
+    } catch (saveError) {
+      console.error("summary failure metadata save failed", {
+        fileId: id,
+        errorName: saveError instanceof Error ? saveError.name : "UnknownError",
+        errorMessage: saveError instanceof Error ? saveError.message : "メタデータ保存に失敗しました。"
+      });
+    }
+
     return NextResponse.json({ error: message, file: nextMetadata }, { status: 500 });
   }
 }

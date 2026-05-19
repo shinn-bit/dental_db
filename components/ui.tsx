@@ -4,12 +4,14 @@ export function Button({
   children,
   variant = "primary",
   className = "",
+  type = "button",
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost";
 }) {
   return (
     <button
+      type={type}
       className={clsx(
         "inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55",
         variant === "primary" && "bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)]",
