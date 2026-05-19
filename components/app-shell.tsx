@@ -1,16 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { usePathname } from "next/navigation";
-import { BotMessageSquare, FolderUp, LogOut, Settings, ShieldCheck } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { BookOpen } from "lucide-react";
 import { clsx } from "clsx";
-import { Button } from "@/components/ui";
 
 const navItems = [
-  { href: "/", label: "AIアシスタント", icon: BotMessageSquare },
-  { href: "/manuals", label: "マニュアル管理", icon: FolderUp },
-  { href: "/admin/settings", label: "分類設定", icon: Settings }
+  { href: "/", label: "AIチャット" },
+  { href: "/manuals", label: "資料管理" },
+  { href: "/admin/settings", label: "分類設定" }
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -28,48 +26,35 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-[var(--line)] bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-3">
-          <Link href="/" className="flex min-w-0 items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-[var(--primary)] text-white">
-              <ShieldCheck size={20} aria-hidden="true" />
+    <div className="app">
+      <header className="header">
+        <div className="header-inner">
+          <Link href="/" className="brand">
+            <span className="brand-mark" aria-hidden="true">
+              <BookOpen size={20} strokeWidth={1.6} />
             </span>
-            <span className="min-w-0">
-              <span className="block text-base font-semibold leading-5">院内ナレッジAI</span>
-              <span className="block text-xs text-[var(--muted)]">Dental Manual Assistant</span>
+            <span className="brand-text">
+              <span className="brand-title serif">院内ナレッジ</span>
+              <span className="brand-sub">Clinic Knowledge</span>
             </span>
           </Link>
-          <nav className="flex items-center gap-1" aria-label="主要メニュー">
+          <nav className="nav" aria-label="主要メニュー">
             {navItems.map((item) => {
-              const Icon = item.icon;
-              const active =
-                item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
-
+              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
               return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={clsx(
-                    "flex h-10 items-center gap-2 rounded-md px-3 text-sm font-medium transition",
-                    active
-                      ? "bg-[#e6f3f1] text-[var(--primary-dark)]"
-                      : "text-[#394452] hover:bg-[#eef2f6]"
-                  )}
-                >
-                  <Icon size={17} aria-hidden="true" />
-                  <span className="hidden sm:inline">{item.label}</span>
+                <Link key={item.href} href={item.href} className={clsx("nav-item", active && "active")}>
+                  {item.label}
                 </Link>
               );
             })}
-            <Button variant="ghost" onClick={logout} className="ml-1">
-              <LogOut size={17} aria-hidden="true" />
-              <span className="hidden sm:inline">ログアウト</span>
-            </Button>
+            <span className="nav-divider" />
+            <button type="button" className="nav-item nav-ghost" onClick={logout}>
+              ログアウト
+            </button>
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-7xl px-5 py-6">{children}</main>
+      <main className="main">{children}</main>
     </div>
   );
 }

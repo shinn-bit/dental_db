@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Clipboard, ClipboardCheck, FileText, Plus, Send, Sparkles, X } from "lucide-react";
-import { Badge, Button } from "@/components/ui";
+import { Check, Clipboard, ClipboardCheck, Plus, Search, Send, X } from "lucide-react";
+import { Button } from "@/components/ui";
 import { type ManualMetadata } from "@/lib/manuals";
 
 type ChatMessage = {
@@ -15,8 +14,18 @@ type ChatMessage = {
 
 const initialMessages: ChatMessage[] = [
   {
+    role: "user",
+    text: "新人衛生士向けに、SRPの注意点を3つだけ短くまとめて。"
+  },
+  {
     role: "assistant",
-    text: "院内マニュアルを参照して回答します。資料を追加・同期した後に質問してください。"
+    text: `以下、新人衛生士さん向けにSRPで特に押さえるポイントを3つに絞りました。
+
+1. **プロービング圧は20gが目安**。強く入れすぎると正確な深さが測れず、歯肉も傷つけます。
+2. **キュレットはモディファイドペングリップで把持**。指で支点をつくり、手首ではなく前腕で動かす意識を。
+3. **ストロークは短く確実に**。長く引きずるストロークは歯肉損傷の原因になります。
+
+判断に迷ったら必ず先輩に声をかけてから処置に入ってください。`
   }
 ];
 
@@ -28,12 +37,17 @@ export function ChatPanel() {
   const [manuals, setManuals] = useState<ManualMetadata[]>([]);
   const [selectedManualIds, setSelectedManualIds] = useState<string[]>([]);
   const [manualPickerOpen, setManualPickerOpen] = useState(false);
+  const [manualQuery, setManualQuery] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
   const manualPickerRef = useRef<HTMLDivElement | null>(null);
 
   const selectedManuals = useMemo(
     () => manuals.filter((manual) => selectedManualIds.includes(manual.id)),
     [manuals, selectedManualIds]
+  );
+  const filteredManuals = useMemo(
+    () => manuals.filter((manual) => manual.fileName.toLowerCase().includes(manualQuery.toLowerCase())),
+    [manualQuery, manuals]
   );
 
   useEffect(() => {
@@ -65,11 +79,7 @@ export function ChatPanel() {
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
-      if (!manualPickerRef.current) {
-        return;
-      }
-
-      if (!manualPickerRef.current.contains(event.target as Node)) {
+      if (manualPickerRef.current && !manualPickerRef.current.contains(event.target as Node)) {
         setManualPickerOpen(false);
       }
     }
@@ -78,9 +88,7 @@ export function ChatPanel() {
       document.addEventListener("pointerdown", handlePointerDown);
     }
 
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-    };
+    return () => document.removeEventListener("pointerdown", handlePointerDown);
   }, [manualPickerOpen]);
 
   function toggleManual(id: string) {
@@ -119,16 +127,10 @@ export function ChatPanel() {
           manuals: selectedManuals.map((manual) => ({
             id: manual.id,
             fileName: manual.fileName,
-            s3Key: manual.s3Key,
-            summaryKey: manual.summaryKey,
-            knowledgeBaseKey: manual.knowledgeBaseKey,
-            extractedTextKey: manual.extractedTextKey
+            s3Key: manual.s3Key
           }))
         })
       });
-      if (!response.ok) {
-        throw new Error("Failed to chat");
-      }
       const data = (await response.json()) as { answer?: string; error?: string };
       if (!response.ok) {
         throw new Error(data.error || "Failed to chat");
@@ -139,213 +141,189 @@ export function ChatPanel() {
           role: "assistant",
           text:
             data.answer?.trim() ||
-            "回答を生成できませんでした。資料が同期済みか、質問内容が資料内にあるか確認してください。"
+            "院内マニュアルから該当する内容を見つけられませんでした。資料の同期状態を確認してください。"
         }
       ]);
     } catch (error) {
       const message = error instanceof Error ? error.message : "";
-      setNotice(
-        message
-          ? `回答生成に失敗しました。${message}`
-          : "回答生成に失敗しました。同期状態、Bedrockモデルアクセス、SSO期限を確認してください。"
-      );
+      setNotice(message ? `回答生成に失敗しました。${message}` : "回答生成に失敗しました。");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
-      <section className="min-h-[620px] rounded-md border border-[var(--line)] bg-white">
-        <div className="border-b border-[var(--line)] px-5 py-4">
-          <div className="flex items-center gap-2 text-sm font-semibold text-[#253041]">
-            <Sparkles size={18} className="text-[var(--primary)]" aria-hidden="true" />
-            チャット
-          </div>
+    <section className="panel" style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 200px)" }}>
+      <div className="panel-head">
+        <div className="row" style={{ gap: 10 }}>
+          <span className="panel-title">会話</span>
+          <span className="panel-sub">{messages.filter((message) => message.role === "user").length} 件の質問</span>
         </div>
+        <div className="row" style={{ gap: 8 }}>
+          <span className="dot ok" />
+          <span className="tiny soft">資料の読み込み完了</span>
+        </div>
+      </div>
 
-        <div className="space-y-4 px-5 py-5">
-          {messages.map((message, index) => (
-            <div
+      <div style={{ flex: 1, padding: "28px 28px 8px", display: "flex", flexDirection: "column", gap: 22, overflowY: "auto" }}>
+        {messages.map((message, index) =>
+          message.role === "user" ? (
+            <UserMessage key={`${message.role}-${index}`} text={message.text} />
+          ) : (
+            <AssistantMessage
               key={`${message.role}-${index}`}
-              className={`flex ${message.role === "user" ? "justify-end" : "justify-start"}`}
-            >
-              <div className="group relative max-w-[78%]">
-                <div
-                  className={`rounded-md px-4 py-3 text-sm leading-6 ${
-                    message.role === "user"
-                      ? "bg-[var(--primary)] text-white"
-                      : "border border-[var(--line)] bg-[#f8fafb] text-[#253041]"
-                  }`}
-                >
-                  {message.role === "assistant" ? (
-                    <MarkdownMessage text={message.text} />
-                  ) : (
-                    <span className="whitespace-pre-wrap">{message.text}</span>
-                  )}
-                </div>
-                {message.role === "assistant" ? (
-                  <button
-                    type="button"
-                    className="absolute -right-2 -top-2 inline-flex h-8 w-8 items-center justify-center rounded-md border border-[var(--line)] bg-white text-[#394452] opacity-0 shadow-sm transition hover:bg-[#f0f3f6] group-hover:opacity-100 focus:opacity-100"
-                    title="回答をコピー"
-                    onClick={() => copyMessage(message.text, index)}
-                  >
-                    {copiedMessageIndex === index ? (
-                      <ClipboardCheck size={16} aria-hidden="true" />
-                    ) : (
-                      <Clipboard size={16} aria-hidden="true" />
-                    )}
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          ))}
-          {loading ? (
-            <div className="text-sm text-[var(--muted)]">回答を生成しています。</div>
-          ) : null}
-          {notice ? (
-            <p className="rounded-md border border-[#f0d8b8] bg-[#fff8ed] px-3 py-2 text-sm text-[#7a4a11]">
-              {notice}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="mt-auto border-t border-[var(--line)] p-4">
-          {selectedManuals.length > 0 ? (
-            <div className="mb-3 flex flex-wrap gap-2">
-              {selectedManuals.map((manual) => (
-                <span
-                  key={manual.id}
-                  className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-[#d7e7e4] bg-[#eef8f6] px-2 py-1 text-xs font-semibold text-[var(--primary-dark)]"
-                >
-                  <span className="max-w-56 truncate">{manual.fileName}</span>
-                  <button
-                    type="button"
-                    title="参照から外す"
-                    onClick={() => toggleManual(manual.id)}
-                  >
-                    <X size={13} aria-hidden="true" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          ) : null}
-          <div className="flex gap-2">
-            <div className="relative" ref={manualPickerRef}>
-              <Button
-                variant="secondary"
-                className="h-24 w-12 px-0"
-                title="参照マニュアルを選択"
-                onClick={() => setManualPickerOpen((current) => !current)}
-              >
-                <Plus size={20} aria-hidden="true" />
-              </Button>
-              {manualPickerOpen ? (
-                <div className="absolute bottom-28 left-0 z-20 w-[min(360px,calc(100vw-2.5rem))] rounded-md border border-[var(--line)] bg-white p-3 shadow-lg">
-                  <div className="mb-2 flex items-center justify-between">
-                    <h2 className="text-sm font-semibold text-[#253041]">参照マニュアル</h2>
-                    <button
-                      type="button"
-                      className="text-xs font-semibold text-[var(--primary-dark)]"
-                      onClick={() => setSelectedManualIds([])}
-                    >
-                      解除
-                    </button>
-                  </div>
-                  <p className="mb-3 text-xs leading-5 text-[var(--muted)]">
-                    選択時はその資料だけを検索対象にします。
-                  </p>
-                  <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                    {manuals.length === 0 ? (
-                      <p className="text-sm text-[var(--muted)]">アップロード済み資料がありません。</p>
-                    ) : null}
-                    {manuals.map((manual) => {
-                      const selected = selectedManualIds.includes(manual.id);
-                      return (
-                        <button
-                          key={manual.id}
-                          type="button"
-                          className={`flex w-full items-start gap-2 rounded-md border px-3 py-2 text-left transition ${
-                            selected
-                              ? "border-[#99d4cc] bg-[#e6f3f1]"
-                              : "border-[var(--line)] bg-white hover:bg-[#f5f7f9]"
-                          }`}
-                          onClick={() => toggleManual(manual.id)}
-                        >
-                          <span
-                            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded border ${
-                              selected
-                                ? "border-[var(--primary)] bg-[var(--primary)] text-white"
-                                : "border-[#b8c3cf] bg-white"
-                            }`}
-                          >
-                            {selected ? <Check size={14} aria-hidden="true" /> : null}
-                          </span>
-                          <span className="min-w-0">
-                            <span className="block truncate text-sm font-semibold text-[#253041]">
-                              {manual.fileName}
-                            </span>
-                            <span className="mt-1 block text-xs text-[var(--muted)]">
-                              {manual.categories.join(", ") || "未分類"}
-                            </span>
-                          </span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-            <textarea
-              className="min-h-24 flex-1 resize-none rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm leading-6 outline-none"
-              placeholder="例: インプラント術前説明の要点を受付向けにまとめて"
-              value={input}
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-                  sendMessage();
-                }
-              }}
+              text={message.text}
+              copied={copiedMessageIndex === index}
+              onCopy={() => copyMessage(message.text, index)}
             />
-            <Button className="h-24 w-24 self-stretch" disabled={loading} onClick={sendMessage}>
-              <Send size={18} aria-hidden="true" />
-              送信
-            </Button>
+          )
+        )}
+        {loading ? (
+          <div className="row" style={{ color: "var(--ink-muted)", fontSize: 13 }}>
+            <span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
+            資料から該当箇所を探しています…
           </div>
-        </div>
-      </section>
-
-      <aside className="space-y-4">
-        <section className="rounded-md border border-[var(--line)] bg-white p-4">
-          <h2 className="text-sm font-semibold text-[#253041]">現在の接続</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Badge>S3保存</Badge>
-            <Badge>Bedrock KB</Badge>
-            <Badge>RAG回答</Badge>
-          </div>
-        </section>
-        <section className="rounded-md border border-[var(--line)] bg-white p-4">
-          <h2 className="text-sm font-semibold text-[#253041]">資料追加</h2>
-          <p className="mt-2 text-sm leading-6 text-[var(--muted)]">
-            新しい資料を追加した後は、マニュアル管理画面でAI同期を実行してください。
+        ) : null}
+        {notice ? (
+          <p className="tag accent" style={{ alignSelf: "flex-start" }}>
+            {notice}
           </p>
-          <Link href="/manuals">
-            <Button className="mt-4 w-full" variant="secondary">
-              <FileText size={17} aria-hidden="true" />
-              マニュアルを追加
+        ) : null}
+      </div>
+
+      <div style={{ borderTop: "1px solid var(--line)", padding: 18, background: "var(--panel-deep)", borderBottomLeftRadius: 16, borderBottomRightRadius: 16 }}>
+        {selectedManuals.length > 0 ? (
+          <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+            <span className="tiny soft" style={{ letterSpacing: "0.14em" }}>参照：</span>
+            {selectedManuals.map((manual) => (
+              <span key={manual.id} className="tag">
+                <span className="truncate" style={{ maxWidth: 180 }}>{manual.fileName.replace(/\.[^.]+$/, "")}</span>
+                <button
+                  type="button"
+                  onClick={() => toggleManual(manual.id)}
+                  style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0, marginLeft: 2, display: "inline-flex" }}
+                  title="この資料を外す"
+                >
+                  <X size={11} aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "stretch" }}>
+          <div style={{ position: "relative" }} ref={manualPickerRef}>
+            <Button
+              variant="secondary"
+              onClick={() => setManualPickerOpen((current) => !current)}
+              title="参照する資料を選ぶ"
+              style={{ height: "100%", paddingLeft: 14, paddingRight: 14, flexDirection: "column", gap: 2 }}
+            >
+              <Plus size={16} aria-hidden="true" />
+              <span style={{ fontSize: 10, letterSpacing: "0.12em", fontWeight: 500 }}>資料を選ぶ</span>
             </Button>
-          </Link>
-        </section>
-      </aside>
+            {manualPickerOpen ? (
+              <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 0, width: 360, maxWidth: "calc(100vw - 32px)", background: "#fff", border: "1px solid var(--line)", borderRadius: 12, boxShadow: "var(--shadow-lg)", padding: 14, zIndex: 20 }}>
+                <div className="between" style={{ marginBottom: 10 }}>
+                  <span className="panel-title" style={{ fontSize: 13 }}>参照する資料</span>
+                  <button type="button" onClick={() => setManualPickerOpen(false)} className="btn ghost sm icon" title="閉じる">
+                    <X size={14} aria-hidden="true" />
+                  </button>
+                </div>
+                <div style={{ position: "relative", marginBottom: 10 }}>
+                  <Search size={14} style={{ position: "absolute", left: 12, top: 12, color: "var(--ink-muted)" }} aria-hidden="true" />
+                  <input className="input" placeholder="ファイル名で探す" style={{ paddingLeft: 34, height: 36 }} value={manualQuery} onChange={(event) => setManualQuery(event.target.value)} />
+                </div>
+                <div className="between" style={{ marginBottom: 8 }}>
+                  <span className="tiny soft">未選択の場合は院内すべての資料から探します</span>
+                  {selectedManualIds.length > 0 ? (
+                    <button type="button" onClick={() => setSelectedManualIds([])} className="btn ghost sm">すべて外す</button>
+                  ) : null}
+                </div>
+                <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {filteredManuals.map((manual) => {
+                    const selected = selectedManualIds.includes(manual.id);
+                    return (
+                      <button
+                        key={manual.id}
+                        type="button"
+                        onClick={() => toggleManual(manual.id)}
+                        style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: selected ? "var(--navy-tint-soft)" : "transparent", border: `1px solid ${selected ? "var(--navy-tint)" : "transparent"}`, borderRadius: 8, textAlign: "left", cursor: "pointer" }}
+                      >
+                        <span style={{ width: 18, height: 18, borderRadius: 4, border: `1.5px solid ${selected ? "var(--navy)" : "#c8c4b5"}`, background: selected ? "var(--navy)" : "transparent", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                          {selected ? <Check size={12} aria-hidden="true" /> : null}
+                        </span>
+                        <span className="stack" style={{ minWidth: 0, flex: 1 }}>
+                          <span className="truncate" style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{manual.fileName.replace(/\.[^.]+$/, "")}</span>
+                          <span className="tiny soft truncate">{manual.categories.join("・")} ／ {manual.roles.join("・")}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <textarea
+            className="textarea"
+            rows={3}
+            placeholder="質問を入力"
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+                event.preventDefault();
+                sendMessage();
+              }
+            }}
+            style={{ resize: "none" }}
+          />
+          <Button onClick={sendMessage} disabled={loading || !input.trim()} style={{ height: "auto", paddingLeft: 18, paddingRight: 18, flexDirection: "column", gap: 4 }}>
+            <Send size={18} aria-hidden="true" />
+            送信
+          </Button>
+        </div>
+        <div className="tiny soft" style={{ marginTop: 8, letterSpacing: "0.06em" }}>⌘ + Enter で送信</div>
+      </div>
+    </section>
+  );
+}
+
+function UserMessage({ text }: { text: string }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ maxWidth: "78%", background: "var(--navy-deep)", color: "#f5efe1", borderRadius: "14px 14px 4px 14px", padding: "12px 16px", fontSize: 14, lineHeight: 1.7, whiteSpace: "pre-wrap", letterSpacing: "0.02em" }}>
+        {text}
+      </div>
     </div>
   );
 }
 
-function MarkdownMessage({ text }: { text: string }) {
+function AssistantMessage({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
   return (
-    <div className="prose-lite">
-      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    <div style={{ display: "flex", justifyContent: "flex-start" }}>
+      <div style={{ maxWidth: "84%" }}>
+        <div className="row" style={{ marginBottom: 8, gap: 8 }}>
+          <span style={{ width: 22, height: 22, borderRadius: 6, background: "var(--navy-tint)", color: "var(--navy-deep)", display: "inline-flex", alignItems: "center", justifyContent: "center", fontFamily: '"Noto Serif JP",serif', fontWeight: 600, fontSize: 11 }}>知</span>
+          <span className="tiny" style={{ color: "var(--navy-deep)", fontWeight: 600, letterSpacing: "0.1em" }}>院内ナレッジ</span>
+        </div>
+        <div style={{ background: "#ffffff", border: "1px solid var(--line)", borderRadius: "4px 14px 14px 14px", padding: "14px 18px", fontSize: 14, lineHeight: 1.85, color: "var(--ink)" }}>
+          <div className="prose-lite">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+          </div>
+        </div>
+        <div className="row" style={{ marginTop: 10, gap: 6, flexWrap: "wrap" }}>
+          <span className="tiny soft" style={{ letterSpacing: "0.14em" }}>出典</span>
+          <span className="tag accent">
+            <span className="truncate" style={{ maxWidth: 220 }}>院内資料</span>
+            <span style={{ opacity: 0.75 }}>p.—</span>
+          </span>
+          <button type="button" className="btn ghost sm" style={{ marginLeft: 4 }} onClick={onCopy}>
+            {copied ? <ClipboardCheck size={13} aria-hidden="true" /> : <Clipboard size={13} aria-hidden="true" />}
+            コピー
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

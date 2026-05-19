@@ -3,8 +3,8 @@ import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "院内ナレッジAI",
-  description: "歯科医院向けのマニュアル検索・生成AIアシスタント"
+  title: "院内ナレッジ",
+  description: "Clinic Knowledge"
 };
 
 export default function RootLayout({

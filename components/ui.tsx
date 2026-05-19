@@ -3,21 +3,21 @@ import { clsx } from "clsx";
 export function Button({
   children,
   variant = "primary",
+  size,
   className = "",
   type = "button",
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
   variant?: "primary" | "secondary" | "ghost";
+  size?: "sm";
 }) {
   return (
     <button
       type={type}
       className={clsx(
-        "inline-flex h-10 items-center justify-center gap-2 rounded-md px-4 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-55",
-        variant === "primary" && "bg-[var(--primary)] text-white hover:bg-[var(--primary-dark)]",
-        variant === "secondary" &&
-          "border border-[var(--line)] bg-white text-[#253041] hover:bg-[#f0f3f6]",
-        variant === "ghost" && "text-[#394452] hover:bg-[#eef2f6]",
+        "btn",
+        variant !== "primary" && variant,
+        size,
         className
       )}
       {...props}
@@ -28,13 +28,33 @@ export function Button({
 }
 
 export function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <label className="mb-1.5 block text-sm font-semibold text-[#253041]">{children}</label>;
+  return <label className="label">{children}</label>;
 }
 
 export function Badge({ children }: { children: React.ReactNode }) {
+  return <span className="tag">{children}</span>;
+}
+
+export function FileSpine({
+  name,
+  ext,
+  version,
+  size = "md"
+}: {
+  name: string;
+  ext: string;
+  version?: string;
+  size?: "sm" | "md";
+}) {
+  const colors = ["#324a6b", "#4a3f5e", "#3f5e54", "#5e4a32", "#2c4a4a", "#4d3f3f"];
+  const hash = Array.from(name).reduce((sum, char) => sum + char.charCodeAt(0), 0);
+  const title = name.replace(/\.[^.]+$/, "");
+
   return (
-    <span className="inline-flex items-center rounded-md border border-[#d7e7e4] bg-[#eef8f6] px-2 py-1 text-xs font-medium text-[var(--primary-dark)]">
-      {children}
-    </span>
+    <div className={clsx("file-spine", size)} style={{ background: colors[hash % colors.length] }}>
+      <div className="file-spine-meta">{ext.toUpperCase().slice(0, 4)}</div>
+      <div className="file-spine-title">{title}</div>
+      <div className="file-spine-meta">{version || "-"}</div>
+    </div>
   );
 }
