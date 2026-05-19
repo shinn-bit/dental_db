@@ -1,4 +1,5 @@
 import { S3Client } from "@aws-sdk/client-s3";
+import { SFNClient } from "@aws-sdk/client-sfn";
 import { BedrockAgentClient } from "@aws-sdk/client-bedrock-agent";
 import { BedrockAgentRuntimeClient } from "@aws-sdk/client-bedrock-agent-runtime";
 import { BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime";
@@ -14,6 +15,13 @@ function getCredentials() {
 
 export function createS3Client() {
   return new S3Client({
+    region: appEnv.awsRegion,
+    ...(getCredentials() ? { credentials: getCredentials() } : {})
+  });
+}
+
+export function createStepFunctionsClient() {
+  return new SFNClient({
     region: appEnv.awsRegion,
     ...(getCredentials() ? { credentials: getCredentials() } : {})
   });
