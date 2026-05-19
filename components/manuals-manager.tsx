@@ -71,7 +71,7 @@ export function ManualsManager() {
   const [selectedSummary, setSelectedSummary] = useState<ManualFile | null>(null);
   const [summaryDraft, setSummaryDraft] = useState("");
   const [summaryEditing, setSummaryEditing] = useState(false);
-  const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
+  const [summaryProcessingIds, setSummaryProcessingIds] = useState<Set<string>>(new Set());
   const [summaryCopied, setSummaryCopied] = useState(false);
 
   const activeSettings = useMemo(
@@ -301,8 +301,14 @@ export function ManualsManager() {
   }
 
   async function openOrCreateSummary(file: ManualFile) {
-    setSummaryProcessingId(file.id);
-    setSelectedSummary(file);
+    const optimisticFile: ManualFile =
+      file.summaryStatus === "completed" ? file : { ...file, summaryStatus: "processing" };
+
+    if (file.summaryStatus !== "completed") {
+      setSummaryProcessingIds((current) => new Set(current).add(file.id));
+    }
+    setFiles((current) => current.map((item) => (item.id === file.id ? optimisticFile : item)));
+    setSelectedSummary(optimisticFile);
     setSummaryDraft(file.summary || "");
     setSummaryEditing(false);
 
@@ -322,13 +328,15 @@ export function ManualsManager() {
       setSummaryEditing(false);
 
       if (nextFile.summaryStatus === "processing") {
-        await pollSummary(nextFile.id);
+        void pollSummary(nextFile.id);
       } else {
-        setSummaryProcessingId(null);
+        setSummaryProcessingIds((current) => withoutSetValue(current, nextFile.id));
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "要約の取得または作成に失敗しました。";
-      setSummaryProcessingId(null);
+      setSummaryProcessingIds((current) => withoutSetValue(current, file.id));
+      setFiles((current) => current.map((item) => (item.id === file.id ? file : item)));
+      setSelectedSummary(file);
       setNotice(message);
     }
   }
@@ -351,12 +359,12 @@ export function ManualsManager() {
 
       if (nextFile.summaryStatus === "completed") {
         setNotice("要約が完了しました。OCRテキストがある場合はAI同期後にRAG検索にも使われます。");
-        setSummaryProcessingId(null);
+        setSummaryProcessingIds((current) => withoutSetValue(current, fileId));
         return;
       }
 
       if (nextFile.summaryStatus === "failed") {
-        setSummaryProcessingId(null);
+        setSummaryProcessingIds((current) => withoutSetValue(current, fileId));
         throw new Error(data.error || "要約処理に失敗しました。");
       }
 
@@ -366,7 +374,6 @@ export function ManualsManager() {
     }
 
     setNotice("OCRまたは要約は継続中です。しばらくしてから要約を再度開いてください。");
-    setSummaryProcessingId(null);
   }
 
   async function saveSummary() {
@@ -374,7 +381,7 @@ export function ManualsManager() {
       return;
     }
 
-    setSummaryProcessingId(selectedSummary.id);
+    setSummaryProcessingIds((current) => new Set(current).add(selectedSummary.id));
     try {
       const response = await fetch(`/api/files/${selectedSummary.id}/summary`, {
         method: "PUT",
@@ -397,7 +404,7 @@ export function ManualsManager() {
       const message = error instanceof Error ? error.message : "要約の保存に失敗しました。";
       setNotice(message);
     } finally {
-      setSummaryProcessingId(null);
+      setSummaryProcessingIds((current) => withoutSetValue(current, selectedSummary.id));
     }
   }
 
@@ -689,10 +696,10 @@ export function ManualsManager() {
                       </Button>
                       <Button
                         variant={file.summaryStatus === "completed" ? "secondary" : "primary"}
-                        disabled={summaryProcessingId === file.id || file.summaryStatus === "processing"}
+                        disabled={summaryProcessingIds.has(file.id) || file.summaryStatus === "processing"}
                         onClick={() => openOrCreateSummary(file)}
                       >
-                        {summaryProcessingId === file.id || file.summaryStatus === "processing"
+                        {summaryProcessingIds.has(file.id) || file.summaryStatus === "processing"
                           ? "処理中"
                           : file.summaryStatus === "completed"
                             ? "要約"
@@ -785,7 +792,7 @@ export function ManualsManager() {
                   ? ` / 文字抽出: ${textExtractionStatusLabel(selectedSummary.textExtractionStatus)}`
                   : ""}
               </p>
-              {selectedSummary.summaryStatus === "processing" || summaryProcessingId === selectedSummary.id ? (
+              {selectedSummary.summaryStatus === "processing" || summaryProcessingIds.has(selectedSummary.id) ? (
                 <p className="mt-1 flex items-center gap-1 text-xs text-[var(--primary-dark)]">
                   <RefreshCw size={12} className="animate-spin" aria-hidden="true" />
                   {selectedSummary.textExtractionStatus === "processing" ? "OCR中" : "要約中"}
@@ -798,7 +805,7 @@ export function ManualsManager() {
                 コピー
               </Button>
               {summaryEditing ? (
-                <Button disabled={summaryProcessingId === selectedSummary.id} onClick={saveSummary}>
+                <Button disabled={summaryProcessingIds.has(selectedSummary.id)} onClick={saveSummary}>
                   <Save size={16} aria-hidden="true" />
                   保存
                 </Button>
@@ -1015,4 +1022,10 @@ function textExtractionStatusLabel(status: ManualMetadata["textExtractionStatus"
     return "失敗";
   }
   return "未確認";
+}
+
+function withoutSetValue<T>(set: Set<T>, value: T) {
+  const next = new Set(set);
+  next.delete(value);
+  return next;
 }
