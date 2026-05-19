@@ -5,9 +5,6 @@ import {
   StartDocumentTextDetectionCommand
 } from "@aws-sdk/client-textract";
 import { NextResponse } from "next/server";
-import { join } from "path";
-import { PDFParse } from "pdf-parse";
-import { pathToFileURL } from "url";
 import {
   createBedrockRuntimeClient,
   createS3Client,
@@ -50,8 +47,6 @@ const summaryTemplate = `
 `;
 
 const MIN_EXTRACTED_TEXT_LENGTH = 100;
-const MIN_MEANINGFUL_TEXT_LENGTH = 1000;
-const MIN_MEANINGFUL_CHARS_PER_PAGE = 20;
 
 async function getMetadata(id: string) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
@@ -73,51 +68,6 @@ async function saveMetadata(metadata: ManualMetadata) {
 
 function getTextractSourceBucket() {
   return requireEnv(appEnv.textractBucketName, "APP_TEXTRACT_BUCKET_NAME");
-}
-
-function configurePdfWorker() {
-  const workerPath = join(
-    process.cwd(),
-    "node_modules",
-    "pdf-parse",
-    "dist",
-    "worker",
-    "pdf.worker.mjs"
-  );
-  PDFParse.setWorker(pathToFileURL(workerPath).toString());
-}
-
-function cleanExtractedText(text: string) {
-  return text
-    .replace(/^--\s*\d+\s+of\s+\d+\s*--$/gim, "")
-    .replace(/[ \t]+\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-function hasEnoughMeaningfulText(text: string, pageCount?: number) {
-  const compactText = cleanExtractedText(text).replace(/\s+/g, "");
-  const minimumLength = Math.max(
-    MIN_MEANINGFUL_TEXT_LENGTH,
-    (pageCount || 1) * MIN_MEANINGFUL_CHARS_PER_PAGE
-  );
-
-  return compactText.length >= minimumLength;
-}
-
-async function extractTextWithPdfParse(fileBytes: Uint8Array) {
-  configurePdfWorker();
-  const parser = new PDFParse({ data: Buffer.from(fileBytes) });
-
-  try {
-    const parsed = await parser.getText();
-    return {
-      pageCount: parsed.total,
-      text: cleanExtractedText(parsed.text || "")
-    };
-  } finally {
-    await parser.destroy();
-  }
 }
 
 async function stagePdfForTextract(sourceBucket: string, sourceKey: string, id: string) {
@@ -259,18 +209,6 @@ async function generateAndSaveSummary(bucket: string, metadata: ManualMetadata) 
 }
 
 async function startTextExtraction(bucket: string, metadata: ManualMetadata) {
-  const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
-  const parsed = await extractTextWithPdfParse(fileBytes);
-
-  if (hasEnoughMeaningfulText(parsed.text, parsed.pageCount)) {
-    const extractedMetadata = await saveExtractedText(bucket, metadata, parsed.text, "pdf");
-    return {
-      ...extractedMetadata,
-      summaryStatus: "processing" as const,
-      summaryError: ""
-    };
-  }
-
   const staged = await stagePdfForTextract(bucket, metadata.s3Key, metadata.id);
   const textractJobId = await startTextractJob(staged.bucket, staged.key);
 
