@@ -328,7 +328,10 @@ export function ManualsManager() {
       setSummaryEditing(false);
 
       if (nextFile.summaryStatus === "processing") {
-        void pollSummary(nextFile.id);
+        void pollSummary(nextFile.id).catch((error) => {
+          const message = error instanceof Error ? error.message : "要約処理の状態確認に失敗しました。";
+          setNotice(message);
+        });
       } else {
         setSummaryProcessingIds((current) => withoutSetValue(current, nextFile.id));
       }

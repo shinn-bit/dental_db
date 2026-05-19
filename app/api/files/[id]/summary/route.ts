@@ -258,8 +258,46 @@ async function generateAndSaveSummary(bucket: string, metadata: ManualMetadata) 
   return nextMetadata;
 }
 
+async function startTextExtraction(bucket: string, metadata: ManualMetadata) {
+  const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
+  const parsed = await extractTextWithPdfParse(fileBytes);
+
+  if (hasEnoughMeaningfulText(parsed.text, parsed.pageCount)) {
+    const extractedMetadata = await saveExtractedText(bucket, metadata, parsed.text, "pdf");
+    return {
+      ...extractedMetadata,
+      summaryStatus: "processing" as const,
+      summaryError: ""
+    };
+  }
+
+  const staged = await stagePdfForTextract(bucket, metadata.s3Key, metadata.id);
+  const textractJobId = await startTextractJob(staged.bucket, staged.key);
+
+  return {
+    ...metadata,
+    summaryStatus: "processing" as const,
+    summaryError: "",
+    textExtractionStatus: "processing" as const,
+    textExtractionSource: "ocr" as const,
+    extractedTextLength: 0,
+    textractJobId
+  };
+}
+
 async function advanceSummaryJob(bucket: string, metadata: ManualMetadata) {
   let nextMetadata = metadata;
+
+  if (
+    nextMetadata.summaryStatus === "processing" &&
+    !nextMetadata.extractedTextKey &&
+    (!nextMetadata.textExtractionStatus ||
+      nextMetadata.textExtractionStatus === "not_started" ||
+      nextMetadata.textExtractionStatus === "ocr_required")
+  ) {
+    nextMetadata = await startTextExtraction(bucket, nextMetadata);
+    await saveMetadata(nextMetadata);
+  }
 
   if (nextMetadata.textExtractionStatus === "processing" && nextMetadata.textractJobId) {
     const stagingKey = createTextractInputS3Key(nextMetadata.id);
@@ -312,8 +350,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
 
   try {
     if (metadata.summaryStatus === "processing") {
-      const nextMetadata = await advanceSummaryJob(bucket, metadata);
-      return NextResponse.json({ summary: nextMetadata.summary || "", file: nextMetadata }, { status: 202 });
+      return NextResponse.json({ summary: metadata.summary || "", file: metadata }, { status: 202 });
     }
 
     if (metadata.summaryKey) {
@@ -321,30 +358,15 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ summary, file: { ...metadata, summary } });
     }
 
-    const fileBytes = await getS3Bytes(bucket, metadata.s3Key);
-    const parsed = await extractTextWithPdfParse(fileBytes);
-
-    if (hasEnoughMeaningfulText(parsed.text, parsed.pageCount)) {
-      const extractedMetadata = await saveExtractedText(bucket, metadata, parsed.text, "pdf");
-      const processingMetadata: ManualMetadata = {
-        ...extractedMetadata,
-        summaryStatus: "processing",
-        summaryError: ""
-      };
-      await saveMetadata(processingMetadata);
-      return NextResponse.json({ summary: "", file: processingMetadata }, { status: 202 });
-    }
-
-    const staged = await stagePdfForTextract(bucket, metadata.s3Key, metadata.id);
-    const textractJobId = await startTextractJob(staged.bucket, staged.key);
     const nextMetadata: ManualMetadata = {
       ...metadata,
       summaryStatus: "processing",
       summaryError: "",
-      textExtractionStatus: "processing",
-      textExtractionSource: "ocr",
-      extractedTextLength: 0,
-      textractJobId
+      textExtractionStatus:
+        metadata.textExtractionStatus === "failed" && !metadata.extractedTextKey
+          ? "not_started"
+          : metadata.textExtractionStatus || "not_started",
+      textractJobId: metadata.textExtractionStatus === "failed" ? "" : metadata.textractJobId
     };
 
     await saveMetadata(nextMetadata);
