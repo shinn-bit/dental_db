@@ -3,6 +3,7 @@ import os
 from datetime import datetime, timezone
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 
@@ -43,7 +44,11 @@ TEXTRACT_REGION = os.environ.get("APP_TEXTRACT_REGION") or os.environ.get("TEXTR
 s3 = boto3.client("s3", region_name=AWS_REGION)
 textract_s3 = boto3.client("s3", region_name=TEXTRACT_REGION)
 textract = boto3.client("textract", region_name=TEXTRACT_REGION)
-bedrock = boto3.client("bedrock-runtime", region_name=AWS_REGION)
+bedrock = boto3.client(
+    "bedrock-runtime",
+    region_name=AWS_REGION,
+    config=Config(connect_timeout=10, read_timeout=840, retries={"max_attempts": 1}),
+)
 
 
 def metadata_key(file_id):
@@ -249,7 +254,10 @@ def generate_summary(event):
     if len(extracted_text) < MIN_EXTRACTED_TEXT_LENGTH:
         return fail_metadata(metadata, "OCR後もPDFから十分なテキストを抽出できませんでした。")
 
-    summary = invoke_bedrock_summary(extracted_text)
+    try:
+        summary = invoke_bedrock_summary(extracted_text)
+    except Exception as error:
+        return fail_metadata(metadata, f"Bedrock要約生成に失敗しました: {error}")
     if not summary:
         return fail_metadata(metadata, "Bedrockから要約本文が返りませんでした。")
 
