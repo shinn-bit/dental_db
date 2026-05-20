@@ -65,6 +65,7 @@ export function ManualsManager() {
   const [selectedDetail, setSelectedDetail] = useState<ManualFile | null>(null);
   const [detailDraft, setDetailDraft] = useState<DetailDraft | null>(null);
   const [detailSaving, setDetailSaving] = useState(false);
+  const [sourceViewerFile, setSourceViewerFile] = useState<ManualFile | null>(null);
   const [selectedSummary, setSelectedSummary] = useState<ManualFile | null>(null);
   const [summaryDraft, setSummaryDraft] = useState("");
   const [summaryEditing, setSummaryEditing] = useState(false);
@@ -594,8 +595,13 @@ export function ManualsManager() {
           onToggle={toggleDetail}
           onDraft={setDetailDraft}
           onSave={saveDetail}
+          onOpenSource={() => setSourceViewerFile(selectedDetail)}
           onClose={() => setSelectedDetail(null)}
         />
+      ) : null}
+
+      {sourceViewerFile ? (
+        <SourceViewerOverlay file={sourceViewerFile} onClose={() => setSourceViewerFile(null)} />
       ) : null}
 
       {selectedSummary ? (
@@ -708,6 +714,7 @@ function DetailOverlay({
   onToggle,
   onDraft,
   onSave,
+  onOpenSource,
   onClose
 }: {
   file: ManualFile;
@@ -717,6 +724,7 @@ function DetailOverlay({
   onToggle: (group: MasterGroupKey, id: string) => void;
   onDraft: React.Dispatch<React.SetStateAction<DetailDraft | null>>;
   onSave: () => void;
+  onOpenSource: () => void;
   onClose: () => void;
 }) {
   useEffect(() => {
@@ -746,6 +754,11 @@ function DetailOverlay({
           <button type="button" className="btn ghost icon" onClick={onClose} title="閉じる (Esc)"><X size={16} /></button>
         </div>
         <div style={{ overflowY: "auto", padding: 24 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+            <Button variant="secondary" size="sm" onClick={onOpenSource}>
+              原本を見る
+            </Button>
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
             <DetailSelector title="種類" items={settings.categories} selectedIds={draft.categories} onToggle={(id) => onToggle("categories", id)} />
             <DetailSelector title="読む人" items={settings.roles} selectedIds={draft.roles} onToggle={(id) => onToggle("roles", id)} />
@@ -776,6 +789,87 @@ function DetailOverlay({
         <div style={{ padding: "14px 24px", borderTop: "1px solid var(--line)", background: "var(--panel-deep)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="secondary" onClick={onClose}>閉じる</Button>
           <Button onClick={onSave} disabled={saving}><Check size={14} aria-hidden="true" />{saving ? "保存中" : "保存"}</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SourceViewerOverlay({ file, onClose }: { file: ManualFile; onClose: () => void }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadPreviewUrl() {
+      try {
+        const response = await fetch(`/api/files/${file.id}/preview-url`, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load source URL");
+        }
+        const data = (await response.json()) as { url: string };
+        if (!ignore) {
+          setPreviewUrl(data.url);
+          setFailed(false);
+        }
+      } catch {
+        if (!ignore) {
+          setFailed(true);
+        }
+      }
+    }
+
+    loadPreviewUrl();
+
+    return () => {
+      ignore = true;
+    };
+  }, [file.id]);
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = "";
+    };
+  }, [onClose]);
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div onClick={(event) => event.stopPropagation()} style={{ width: "min(1180px, calc(100vw - 40px))", height: "calc(100vh - 56px)", background: "var(--panel)", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 16, padding: "14px 18px", borderBottom: "1px solid var(--line)", background: "var(--panel-deep)" }}>
+          <div className="stack" style={{ minWidth: 0 }}>
+            <span className="tiny" style={{ letterSpacing: "0.18em", color: "var(--accent)", fontWeight: 600, textTransform: "uppercase" }}>原本</span>
+            <h2 className="serif truncate" style={{ margin: 0, fontSize: 18, fontWeight: 600, color: "var(--navy-deep)", letterSpacing: "0.04em" }}>{file.name.replace(/\.[^.]+$/, "")}</h2>
+          </div>
+          <button type="button" className="btn ghost icon" onClick={onClose} title="閉じる (Esc)"><X size={16} /></button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, background: "var(--panel-deep)" }}>
+          {failed ? (
+            <div className="stack" style={{ height: "100%", alignItems: "center", justifyContent: "center", color: "var(--ink-muted)", gap: 8 }}>
+              <span className="serif" style={{ fontSize: 20, color: "var(--ink-soft)" }}>原本を表示できませんでした</span>
+              <span className="small soft">署名付きURLの取得に失敗しました。時間をおいて再度お試しください。</span>
+            </div>
+          ) : previewUrl ? (
+            file.contentType.startsWith("image/") ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", background: "#fff" }} />
+            ) : (
+              <iframe title={`${file.name} source`} src={previewUrl} style={{ width: "100%", height: "100%", border: 0, background: "#fff" }} />
+            )
+          ) : (
+            <div className="stack" style={{ height: "100%", alignItems: "center", justifyContent: "center", color: "var(--ink-muted)", gap: 8 }}>
+              <span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
+              <span className="small soft">原本を読み込んでいます</span>
+            </div>
+          )}
         </div>
       </div>
     </div>
