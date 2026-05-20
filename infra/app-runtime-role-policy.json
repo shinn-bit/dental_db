@@ -18,10 +18,13 @@
       ]
     },
     {
-      "Sid": "StartSummaryWorkflow",
+      "Sid": "StartManualWorkflows",
       "Effect": "Allow",
       "Action": "states:StartExecution",
-      "Resource": "arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-summary-worker-dev"
+      "Resource": [
+        "arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-summary-worker-dev",
+        "arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-prepare-worker-dev"
+      ]
     },
     {
       "Sid": "ListManualMetadata",

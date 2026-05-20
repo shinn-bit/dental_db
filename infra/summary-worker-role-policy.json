@@ -49,6 +49,15 @@
         "arn:aws:bedrock:ap-northeast-1::foundation-model/anthropic.claude-sonnet-4-6",
         "arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-sonnet-4-6"
       ]
+    },
+    {
+      "Sid": "BedrockKnowledgeBaseIngestion",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:StartIngestionJob",
+        "bedrock:GetIngestionJob"
+      ],
+      "Resource": "*"
     }
   ]
 }

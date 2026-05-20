@@ -53,6 +53,14 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
       })
     );
   }
+  if (file.knowledgeBaseKey) {
+    await s3.send(
+      new DeleteObjectCommand({
+        Bucket: bucket,
+        Key: file.knowledgeBaseKey
+      })
+    );
+  }
   if (file.extractedTextKey) {
     await s3.send(
       new DeleteObjectCommand({

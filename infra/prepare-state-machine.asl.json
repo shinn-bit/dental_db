@@ -1,0 +1,173 @@
+{
+  "Comment": "OCR, Knowledge Base document creation, and Bedrock KB sync for uploaded dental manuals.",
+  "StartAt": "StartOcr",
+  "States": {
+    "StartOcr": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:392749559673:function:dental-summary-worker-dev",
+      "Parameters": {
+        "action": "start_ocr",
+        "workflow": "prepare",
+        "fileId.$": "$.fileId"
+      },
+      "Next": "OcrStartedChoice",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "OcrStartedChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.status",
+          "StringEquals": "TEXT_READY",
+          "Next": "CreateKnowledgeBaseDocument"
+        }
+      ],
+      "Default": "WaitForOcr"
+    },
+    "WaitForOcr": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "CheckOcr"
+    },
+    "CheckOcr": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:392749559673:function:dental-summary-worker-dev",
+      "Parameters": {
+        "action": "check_ocr",
+        "workflow": "prepare",
+        "fileId.$": "$.fileId"
+      },
+      "Next": "OcrCompleteChoice",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "OcrCompleteChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.ocrStatus",
+          "StringEquals": "IN_PROGRESS",
+          "Next": "WaitForOcr"
+        },
+        {
+          "Variable": "$.ocrStatus",
+          "StringEquals": "SUCCEEDED",
+          "Next": "CreateKnowledgeBaseDocument"
+        }
+      ],
+      "Default": "Failed"
+    },
+    "CreateKnowledgeBaseDocument": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:392749559673:function:dental-summary-worker-dev",
+      "Parameters": {
+        "action": "create_kb_document",
+        "fileId.$": "$.fileId"
+      },
+      "Next": "StartKnowledgeBaseSync",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "StartKnowledgeBaseSync": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:392749559673:function:dental-summary-worker-dev",
+      "Parameters": {
+        "action": "start_kb_sync",
+        "fileId.$": "$.fileId"
+      },
+      "Next": "WaitForKnowledgeBaseSync",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "WaitForKnowledgeBaseSync": {
+      "Type": "Wait",
+      "Seconds": 30,
+      "Next": "CheckKnowledgeBaseSync"
+    },
+    "CheckKnowledgeBaseSync": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:ap-northeast-1:392749559673:function:dental-summary-worker-dev",
+      "Parameters": {
+        "action": "check_kb_sync",
+        "fileId.$": "$.fileId",
+        "ingestionJobId.$": "$.ingestionJobId"
+      },
+      "Next": "KnowledgeBaseSyncChoice",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ]
+    },
+    "KnowledgeBaseSyncChoice": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.syncStatus",
+          "StringEquals": "IN_PROGRESS",
+          "Next": "WaitForKnowledgeBaseSync"
+        },
+        {
+          "Variable": "$.syncStatus",
+          "StringEquals": "COMPLETE",
+          "Next": "Done"
+        }
+      ],
+      "Default": "Failed"
+    },
+    "Failed": {
+      "Type": "Fail"
+    },
+    "Done": {
+      "Type": "Succeed"
+    }
+  }
+}

@@ -102,6 +102,7 @@ bedrock = boto3.client(
     region_name=AWS_REGION,
     config=Config(connect_timeout=10, read_timeout=240, retries={"max_attempts": 1}),
 )
+bedrock_agent = boto3.client("bedrock-agent", region_name=AWS_REGION)
 
 
 def metadata_key(file_id):
@@ -165,16 +166,32 @@ def fail_metadata(metadata, message, text_status=None):
     return {"fileId": metadata["id"], "status": "FAILED", "error": message}
 
 
+def fail_preparation(metadata, message, text_status=None):
+    metadata["preparationStatus"] = "failed"
+    metadata["preparationError"] = message
+    if metadata.get("ragSyncStatus") == "syncing":
+        metadata["ragSyncStatus"] = "failed"
+    if text_status:
+        metadata["textExtractionStatus"] = text_status
+    save_metadata(metadata)
+    return {"fileId": metadata["id"], "status": "FAILED", "error": message}
+
+
 def start_ocr(event):
     file_id = event["fileId"]
     bucket = env("S3_BUCKET_NAME")
     staging_bucket = env("APP_TEXTRACT_BUCKET_NAME")
     metadata = get_metadata(file_id)
+    is_prepare = event.get("workflow") == "prepare"
 
-    if metadata.get("summaryStatus") == "completed" and metadata.get("summaryKey"):
+    if not is_prepare and metadata.get("summaryStatus") == "completed" and metadata.get("summaryKey"):
         return {"fileId": file_id, "status": "ALREADY_COMPLETED"}
 
     if metadata.get("extractedTextKey"):
+        if is_prepare:
+            metadata["preparationStatus"] = "processing"
+            metadata["preparationError"] = ""
+            save_metadata(metadata)
         return {"fileId": file_id, "status": "TEXT_READY"}
 
     if metadata.get("textractJobId") and metadata.get("textExtractionStatus") == "processing":
@@ -194,18 +211,21 @@ def start_ocr(event):
     )
     job_id = response.get("JobId")
     if not job_id:
+        if is_prepare:
+            return fail_preparation(metadata, "Textract OCRジョブを開始できませんでした。", "failed")
         return fail_metadata(metadata, "Textract OCRジョブを開始できませんでした。", "failed")
 
-    metadata.update(
-        {
-            "summaryStatus": "processing",
-            "summaryError": "",
-            "textExtractionStatus": "processing",
-            "textExtractionSource": "ocr",
-            "extractedTextLength": 0,
-            "textractJobId": job_id,
-        }
-    )
+    next_values = {
+        "textExtractionStatus": "processing",
+        "textExtractionSource": "ocr",
+        "extractedTextLength": 0,
+        "textractJobId": job_id,
+    }
+    if is_prepare:
+        next_values.update({"preparationStatus": "processing", "preparationError": ""})
+    else:
+        next_values.update({"summaryStatus": "processing", "summaryError": ""})
+    metadata.update(next_values)
     save_metadata(metadata)
 
     return {"fileId": file_id, "status": "OCR_STARTED", "textractJobId": job_id}
@@ -216,12 +236,15 @@ def check_ocr(event):
     bucket = env("S3_BUCKET_NAME")
     staging_bucket = env("APP_TEXTRACT_BUCKET_NAME")
     metadata = get_metadata(file_id)
+    is_prepare = event.get("workflow") == "prepare"
 
     if metadata.get("extractedTextKey"):
         return {"fileId": file_id, "ocrStatus": "SUCCEEDED"}
 
     job_id = metadata.get("textractJobId")
     if not job_id:
+        if is_prepare:
+            return fail_preparation(metadata, "Textract OCRジョブIDが見つかりません。", "failed")
         return fail_metadata(metadata, "Textract OCRジョブIDが見つかりません。", "failed")
 
     lines = []
@@ -238,6 +261,8 @@ def check_ocr(event):
 
         if job_status in ("FAILED", "PARTIAL_SUCCESS"):
             message = response.get("StatusMessage") or f"Textract OCRジョブが{job_status}で終了しました。"
+            if is_prepare:
+                return fail_preparation(metadata, message, "failed")
             return fail_metadata(metadata, message, "failed")
 
         for block in response.get("Blocks", []):
@@ -275,6 +300,116 @@ def create_knowledge_base_document(summary):
     while "\n\n\n" in normalized:
         normalized = normalized.replace("\n\n\n", "\n\n")
     return normalized.strip()[:1800]
+
+
+def create_knowledge_base_document_from_text(metadata, text):
+    normalized = "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n")).strip()
+    header = [
+        f"# {metadata.get('fileName') or '院内資料'}",
+        "",
+        f"- 種類: {', '.join(metadata.get('categories') or []) or '未設定'}",
+        f"- 診療領域: {', '.join(metadata.get('clinicalAreas') or []) or '未設定'}",
+        f"- 読む人: {', '.join(metadata.get('roles') or []) or '未設定'}",
+    ]
+    if metadata.get("tags"):
+        header.append(f"- タグ: {', '.join(metadata.get('tags') or [])}")
+    if metadata.get("version"):
+        header.append(f"- 版: {metadata.get('version')}")
+    if metadata.get("memo"):
+        header.extend(["", f"## メモ\n{metadata.get('memo')}"])
+    header.extend(["", "## 抽出本文", normalized])
+    return "\n".join(header).strip()
+
+
+def create_kb_document(event):
+    file_id = event["fileId"]
+    bucket = env("S3_BUCKET_NAME")
+    metadata = get_metadata(file_id)
+    extracted_key = metadata.get("extractedTextKey")
+    if not extracted_key:
+        return fail_preparation(metadata, "OCR結果の保存先が見つかりません。")
+
+    extracted_text = get_text(bucket, extracted_key)
+    if len(extracted_text) < MIN_EXTRACTED_TEXT_LENGTH:
+        return fail_preparation(metadata, "OCR後もPDFから十分なテキストを抽出できませんでした。")
+
+    kb_s3_key = knowledge_base_key(file_id)
+    put_text(
+        bucket,
+        kb_s3_key,
+        create_knowledge_base_document_from_text(metadata, extracted_text),
+        "text/markdown; charset=utf-8",
+    )
+    metadata.update(
+        {
+            "knowledgeBaseKey": kb_s3_key,
+            "preparationStatus": "syncing",
+            "preparationError": "",
+            "ragSyncStatus": "not_started",
+            "ragSyncJobId": "",
+        }
+    )
+    save_metadata(metadata)
+    return {"fileId": file_id, "status": "KB_DOCUMENT_CREATED", "knowledgeBaseKey": kb_s3_key}
+
+
+def start_kb_sync(event):
+    file_id = event["fileId"]
+    metadata = get_metadata(file_id)
+    try:
+        response = bedrock_agent.start_ingestion_job(
+            knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
+            dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
+            description=f"Prepare manual {file_id}",
+        )
+    except Exception as error:
+        return fail_preparation(metadata, f"Bedrock KB同期ジョブを開始できませんでした: {error}")
+
+    job = response.get("ingestionJob") or {}
+    job_id = job.get("ingestionJobId", "")
+    metadata.update(
+        {
+            "preparationStatus": "syncing",
+            "preparationError": "",
+            "ragSyncStatus": "syncing",
+            "ragSyncJobId": job_id,
+        }
+    )
+    save_metadata(metadata)
+    return {"fileId": file_id, "status": "SYNC_STARTED", "ingestionJobId": job_id}
+
+
+def check_kb_sync(event):
+    file_id = event["fileId"]
+    metadata = get_metadata(file_id)
+    job_id = event.get("ingestionJobId") or metadata.get("ragSyncJobId")
+    if not job_id:
+        return fail_preparation(metadata, "Bedrock KB同期ジョブIDが見つかりません。")
+
+    response = bedrock_agent.get_ingestion_job(
+        knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
+        dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
+        ingestionJobId=job_id,
+    )
+    job = response.get("ingestionJob") or {}
+    status = job.get("status")
+    if status in ("STARTING", "IN_PROGRESS"):
+        return {"fileId": file_id, "syncStatus": "IN_PROGRESS", "ingestionJobId": job_id}
+    if status == "COMPLETE":
+        metadata.update(
+            {
+                "preparationStatus": "completed",
+                "preparationError": "",
+                "ragSyncStatus": "completed",
+                "ragSyncJobId": job_id,
+                "ragSyncedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            }
+        )
+        save_metadata(metadata)
+        return {"fileId": file_id, "syncStatus": "COMPLETE", "ingestionJobId": job_id}
+
+    message = job.get("failureReasons") or f"Bedrock KB同期ジョブが{status or 'UNKNOWN'}で終了しました。"
+    return fail_preparation(metadata, str(message))
 
 
 def invoke_bedrock(prompt, max_tokens=4096):
@@ -440,4 +575,10 @@ def handler(event, _context):
         return check_ocr(event)
     if action == "generate_summary":
         return generate_summary(event)
+    if action == "create_kb_document":
+        return create_kb_document(event)
+    if action == "start_kb_sync":
+        return start_kb_sync(event)
+    if action == "check_kb_sync":
+        return check_kb_sync(event)
     raise ValueError(f"Unknown action: {action}")

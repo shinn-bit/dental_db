@@ -21,6 +21,11 @@ export type ManualMetadata = {
   summaryKey?: string;
   knowledgeBaseKey?: string;
   summaryUpdatedAt?: string;
+  preparationStatus?: "not_started" | "processing" | "syncing" | "completed" | "failed";
+  preparationError?: string;
+  ragSyncStatus?: "not_started" | "syncing" | "completed" | "failed";
+  ragSyncJobId?: string;
+  ragSyncedAt?: string;
   textExtractionStatus?: "not_started" | "processing" | "completed" | "failed" | "ocr_required";
   textExtractionSource?: "pdf" | "ocr";
   extractedTextKey?: string;

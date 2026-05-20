@@ -1,7 +1,8 @@
 import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
+import { StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-error";
-import { createS3Client } from "@/lib/aws";
+import { createS3Client, createStepFunctionsClient } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import {
   createMetadataS3Key,
@@ -17,6 +18,22 @@ async function bodyToString(body: unknown) {
   }
 
   return (body as { transformToString: () => Promise<string> }).transformToString();
+}
+
+function createPrepareExecutionName(fileId: string) {
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  return `prepare-${fileId}-${suffix}`.replace(/[^A-Za-z0-9-_]/g, "-").slice(0, 80);
+}
+
+async function startPrepareWorkflow(fileId: string) {
+  const stateMachineArn = requireEnv(appEnv.prepareStateMachineArn, "PREPARE_STATE_MACHINE_ARN");
+  await createStepFunctionsClient().send(
+    new StartExecutionCommand({
+      stateMachineArn,
+      name: createPrepareExecutionName(fileId),
+      input: JSON.stringify({ fileId })
+    })
+  );
 }
 
 export async function GET() {
@@ -82,8 +99,14 @@ export async function POST(request: Request) {
       memo: body.memo || "",
       summary: body.summary || "",
       summaryStatus: body.summaryStatus || "not_started",
+      summaryError: body.summaryError || "",
       summaryKey: body.summaryKey || "",
       summaryUpdatedAt: body.summaryUpdatedAt || "",
+      preparationStatus: body.preparationStatus || "processing",
+      preparationError: body.preparationError || "",
+      ragSyncStatus: body.ragSyncStatus || "not_started",
+      ragSyncJobId: body.ragSyncJobId || "",
+      ragSyncedAt: body.ragSyncedAt || "",
       textExtractionStatus: body.textExtractionStatus || "not_started",
       textExtractionSource: body.textExtractionSource,
       extractedTextKey: body.extractedTextKey || "",
@@ -100,6 +123,8 @@ export async function POST(request: Request) {
         ContentType: "application/json; charset=utf-8"
       })
     );
+
+    await startPrepareWorkflow(metadata.id);
 
     return NextResponse.json({ file: metadata });
   } catch (error) {
