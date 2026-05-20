@@ -58,6 +58,7 @@ export function ManualsManager() {
   const [summaryDraft, setSummaryDraft] = useState("");
   const [summaryEditing, setSummaryEditing] = useState(false);
   const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
+  const [blockedSummaryId, setBlockedSummaryId] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
@@ -87,38 +88,63 @@ export function ManualsManager() {
     [files, filter, query]
   );
 
+  async function loadFiles(options: { showLoading?: boolean; updateNotice?: boolean } = {}) {
+    if (options.showLoading) {
+      setIsLoadingFiles(true);
+    }
+    try {
+      const response = await fetch("/api/files", { cache: "no-store" });
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(data.error || "S3一覧を読み込めませんでした。");
+      }
+      const data = (await response.json()) as { files: ManualMetadata[] };
+      setFiles(data.files.map(metadataToManualFile));
+    } catch (error) {
+      if (options.updateNotice !== false) {
+        const message = error instanceof Error ? error.message : "S3一覧を読み込めませんでした。";
+        setNotice(`${message} SSO期限、IAMロール、S3設定を確認してください。`);
+      }
+    } finally {
+      if (options.showLoading) {
+        setIsLoadingFiles(false);
+      }
+    }
+  }
+
   useEffect(() => {
     let ignore = false;
 
-    async function loadFiles() {
-      try {
-        const response = await fetch("/api/files", { cache: "no-store" });
-        if (!response.ok) {
-          const data = (await response.json().catch(() => ({}))) as { error?: string };
-          throw new Error(data.error || "S3一覧を読み込めませんでした。");
-        }
-        const data = (await response.json()) as { files: ManualMetadata[] };
-        if (!ignore) {
-          setFiles(data.files.map(metadataToManualFile));
-        }
-      } catch (error) {
-        if (!ignore) {
-          const message = error instanceof Error ? error.message : "S3一覧を読み込めませんでした。";
-          setNotice(`${message} SSO期限、IAMロール、S3設定を確認してください。`);
-        }
-      } finally {
-        if (!ignore) {
-          setIsLoadingFiles(false);
-        }
+    async function initialLoad() {
+      if (!ignore) {
+        await loadFiles({ showLoading: true });
       }
     }
 
-    loadFiles();
+    initialLoad();
 
     return () => {
       ignore = true;
     };
   }, []);
+
+  useEffect(() => {
+    const hasPendingWork = files.some(
+      (file) =>
+        file.preparationStatus === "processing" ||
+        file.preparationStatus === "syncing" ||
+        file.summaryStatus === "processing"
+    );
+    if (!hasPendingWork) {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      loadFiles({ updateNotice: false });
+    }, 8000);
+
+    return () => window.clearInterval(timer);
+  }, [files]);
 
   function toggle(group: MasterGroupKey, id: string) {
     setSelection((current) => ({
@@ -248,6 +274,13 @@ export function ManualsManager() {
   }
 
   async function openOrCreateSummary(file: ManualFile) {
+    if (file.preparationStatus !== "completed") {
+      setBlockedSummaryId(file.id);
+      setNotice("");
+      window.setTimeout(() => setBlockedSummaryId((current) => (current === file.id ? null : current)), 3600);
+      return;
+    }
+
     setSummaryProcessingId(file.id);
     setNotice("");
     try {
@@ -259,9 +292,14 @@ export function ManualsManager() {
       }
       const nextFile = metadataToManualFile(data.file as ManualMetadata);
       setFiles((current) => current.map((item) => (item.id === nextFile.id ? nextFile : item)));
-      setSelectedSummary(nextFile);
-      setSummaryDraft(data.summary || nextFile.summary || defaultSummary(nextFile));
-      setSummaryEditing(false);
+      if (nextFile.summaryStatus === "completed") {
+        setSelectedSummary(nextFile);
+        setSummaryDraft(data.summary || nextFile.summary);
+        setSummaryEditing(false);
+      } else {
+        setNotice("要約作成を開始しました。完了するとボタンが「要約を見る」に変わります。");
+        await loadFiles({ updateNotice: false });
+      }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "要約の取得または作成に失敗しました。");
     } finally {
@@ -452,6 +490,7 @@ export function ManualsManager() {
                   key={file.id}
                   file={file}
                   processing={summaryProcessingId === file.id}
+                  blocked={blockedSummaryId === file.id}
                   deleting={deletingId === file.id}
                   onSummary={() => openOrCreateSummary(file)}
                   onDelete={() => deleteFile(file)}
@@ -493,8 +532,10 @@ function SelectorGroup({ title, items, selectedIds, onToggle }: { title: string;
   );
 }
 
-function ManualCard({ file, processing, deleting, onSummary, onDelete }: { file: ManualFile; processing: boolean; deleting: boolean; onSummary: () => void; onDelete: () => void }) {
+function ManualCard({ file, processing, blocked, deleting, onSummary, onDelete }: { file: ManualFile; processing: boolean; blocked: boolean; deleting: boolean; onSummary: () => void; onDelete: () => void }) {
   const needsOcr = file.textExtractionStatus === "ocr_required";
+  const canCreateSummary = file.preparationStatus === "completed";
+  const summaryInProgress = file.summaryStatus === "processing" || processing;
   const preparationLabel =
     file.preparationStatus === "completed"
       ? "AI参照可"
@@ -511,7 +552,7 @@ function ManualCard({ file, processing, deleting, onSummary, onDelete }: { file:
   return (
     <article style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12, position: "relative" }}>
       <div className="row" style={{ alignItems: "flex-start", gap: 14 }}>
-        <FileSpine name={file.name} ext={file.thumbnailLabel || file.name.split(".").pop() || "FILE"} version={file.version} />
+        <FilePreview file={file} />
         <div className="stack" style={{ minWidth: 0, flex: 1, gap: 6 }}>
           <h3 className="serif" style={{ margin: 0, fontSize: 15, fontWeight: 600, lineHeight: 1.45, color: "var(--ink)", letterSpacing: "0.02em" }}>{file.name.replace(/\.[^.]+$/, "")}</h3>
           <div className="tiny soft" style={{ letterSpacing: "0.06em" }}>{file.date} ・ {file.sizeLabel}</div>
@@ -536,8 +577,14 @@ function ManualCard({ file, processing, deleting, onSummary, onDelete }: { file:
         {file.version ? <><span style={{ color: "var(--ink-faint)" }}>・</span><span>{file.version}</span></> : null}
       </div>
       <div className="row" style={{ gap: 6, borderTop: "1px solid var(--line-soft)", paddingTop: 12 }}>
-        <Button variant={file.summaryStatus === "completed" ? "secondary" : "primary"} size="sm" style={{ flex: 1 }} disabled={processing} onClick={onSummary}>
-          {processing ? "作成中" : file.summaryStatus === "completed" ? "要約を見る" : "要約をつくる"}
+        <Button
+          variant={file.summaryStatus === "completed" ? "secondary" : canCreateSummary ? "primary" : "secondary"}
+          size="sm"
+          style={{ flex: 1, opacity: canCreateSummary || file.summaryStatus === "completed" ? 1 : 0.58 }}
+          disabled={summaryInProgress}
+          onClick={onSummary}
+        >
+          {summaryInProgress ? "要約作成中" : file.summaryStatus === "completed" ? "要約を見る" : "要約をつくる"}
         </Button>
         <Button variant="ghost" size="sm">
           <Edit size={13} aria-hidden="true" />
@@ -547,7 +594,105 @@ function ManualCard({ file, processing, deleting, onSummary, onDelete }: { file:
           <Trash2 size={13} aria-hidden="true" />
         </button>
       </div>
+      {blocked ? (
+        <div style={{ border: "1px solid var(--line)", background: "var(--panel-deep)", borderRadius: 8, padding: "9px 10px", color: "var(--ink-soft)", fontSize: 12.5, lineHeight: 1.55 }}>
+          AI参照の準備が完了すると要約を作成できます。読み取りと同期が終わるまでお待ちください。
+        </div>
+      ) : null}
     </article>
+  );
+}
+
+function FilePreview({ file }: { file: ManualFile }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  const isPdf = file.contentType.includes("pdf") || file.name.toLowerCase().endsWith(".pdf");
+  const isImage = file.contentType.startsWith("image/");
+  const canPreview = isPdf || isImage;
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadPreviewUrl() {
+      if (!canPreview) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/files/${file.id}/preview-url`, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error("Failed to load preview URL");
+        }
+        const data = (await response.json()) as { url: string };
+        if (!ignore) {
+          setPreviewUrl(data.url);
+          setFailed(false);
+        }
+      } catch {
+        if (!ignore) {
+          setFailed(true);
+        }
+      }
+    }
+
+    loadPreviewUrl();
+
+    return () => {
+      ignore = true;
+    };
+  }, [canPreview, file.id]);
+
+  if (!canPreview || failed) {
+    return (
+      <FileSpine
+        name={file.name}
+        ext={file.thumbnailLabel || file.name.split(".").pop() || "FILE"}
+        version={file.version}
+      />
+    );
+  }
+
+  return (
+    <div
+      style={{
+        width: 92,
+        height: 128,
+        flexShrink: 0,
+        overflow: "hidden",
+        border: "1px solid var(--line)",
+        borderRadius: 8,
+        background: "#fff",
+        boxShadow: "var(--shadow-sm)"
+      }}
+    >
+      <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "var(--panel-deep)" }}>
+        {previewUrl && isImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        ) : null}
+        {previewUrl && isPdf ? (
+          <iframe
+            title={`${file.name} preview`}
+            src={`${previewUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+            style={{
+              width: "178%",
+              height: "178%",
+              border: 0,
+              transform: "scale(0.64)",
+              transformOrigin: "top left",
+              pointerEvents: "none"
+            }}
+            aria-hidden="true"
+          />
+        ) : null}
+        {!previewUrl ? (
+          <div className="stack" style={{ height: "100%", alignItems: "center", justifyContent: "center", gap: 6, color: "var(--ink-muted)" }}>
+            <span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
+            <span className="tiny soft">読み込み中</span>
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -650,19 +795,4 @@ function formatDisplayDate(value: string) {
     minute: "2-digit",
     hour12: false
   }).format(new Date(value)).replace(/\//g, "-");
-}
-
-function defaultSummary(file: ManualFile) {
-  return `## このマニュアルの要点
-
-${file.name.replace(/\.[^.]+$/, "")}の内容を、現場ですぐ使える形にまとめました。
-
-### 目的と対象
-
-- 対象：${file.roles.join("・")}
-- 領域：${file.areas.join("・")}
-- 想定シーン：日々の診療と新人教育の補助
-
-> このページの内容は、元の資料をAIが要約したものです。最終的な判断は必ず原文を確認してください。
-`;
 }
