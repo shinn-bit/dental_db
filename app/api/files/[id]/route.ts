@@ -1,4 +1,4 @@
-import { DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
 import { createS3Client, createTextractS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
@@ -31,6 +31,37 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const file = await getMetadata(id);
 
   return NextResponse.json({ file });
+}
+
+export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
+  const current = await getMetadata(id);
+  const body = (await request.json()) as Partial<ManualMetadata>;
+
+  const nextMetadata: ManualMetadata = {
+    ...current,
+    categoryIds: body.categoryIds || current.categoryIds,
+    categories: body.categories || current.categories,
+    clinicalAreaIds: body.clinicalAreaIds || current.clinicalAreaIds,
+    clinicalAreas: body.clinicalAreas || current.clinicalAreas,
+    roleIds: body.roleIds || current.roleIds,
+    roles: body.roles || current.roles,
+    tags: body.tags || [],
+    version: body.version || "",
+    memo: body.memo || ""
+  };
+
+  await createS3Client().send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: createMetadataS3Key(appEnv.s3MetadataPrefix, id),
+      Body: JSON.stringify(nextMetadata, null, 2),
+      ContentType: "application/json; charset=utf-8"
+    })
+  );
+
+  return NextResponse.json({ file: nextMetadata });
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
