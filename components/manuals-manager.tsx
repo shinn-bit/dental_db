@@ -26,6 +26,7 @@ type ManualFile = {
   summary: string;
   summaryStatus: ManualMetadata["summaryStatus"];
   summaryUpdatedAt: string;
+  preparationStatus: ManualMetadata["preparationStatus"];
   textExtractionStatus: ManualMetadata["textExtractionStatus"];
 };
 
@@ -79,7 +80,7 @@ export function ManualsManager() {
             return file.summaryStatus !== "completed";
           }
           if (filter === "needs-ocr") {
-            return file.textExtractionStatus === "ocr_required";
+            return file.preparationStatus !== "completed";
           }
           return true;
         }),
@@ -494,6 +495,19 @@ function SelectorGroup({ title, items, selectedIds, onToggle }: { title: string;
 
 function ManualCard({ file, processing, deleting, onSummary, onDelete }: { file: ManualFile; processing: boolean; deleting: boolean; onSummary: () => void; onDelete: () => void }) {
   const needsOcr = file.textExtractionStatus === "ocr_required";
+  const preparationLabel =
+    file.preparationStatus === "completed"
+      ? "AI参照可"
+      : file.preparationStatus === "syncing"
+        ? "同期中"
+        : file.preparationStatus === "processing"
+          ? "準備中"
+          : file.preparationStatus === "failed"
+            ? "準備失敗"
+            : needsOcr
+              ? "文字の読み取りが必要"
+              : "読み取り待ち";
+  const preparationColor = file.preparationStatus === "failed" ? "var(--warn)" : "var(--ink-muted)";
   return (
     <article style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12, position: "relative" }}>
       <div className="row" style={{ alignItems: "flex-start", gap: 14 }}>
@@ -510,10 +524,12 @@ function ManualCard({ file, processing, deleting, onSummary, onDelete }: { file:
         {file.roles.slice(0, 2).map((item) => <span className="tag ghost" key={item}>{item}</span>)}
       </div>
       <div className="row" style={{ gap: 4, fontSize: 11, color: "var(--ink-muted)", flexWrap: "wrap" }}>
-        {needsOcr ? (
-          <span className="row" style={{ gap: 4, color: "var(--warn)", background: "var(--warn-tint)", padding: "3px 8px", borderRadius: 4, fontWeight: 500 }}>文字の読み取りが必要</span>
+        {file.preparationStatus === "completed" ? (
+          <span className="row" style={{ gap: 5 }}><span className="dot ok" />{preparationLabel}</span>
+        ) : file.preparationStatus === "processing" || file.preparationStatus === "syncing" ? (
+          <span className="row" style={{ gap: 5 }}><RefreshCw size={11} aria-hidden="true" />{preparationLabel}</span>
         ) : (
-          <span className="row" style={{ gap: 5 }}><span className="dot ok" />読み取り済み</span>
+          <span className="row" style={{ gap: 4, color: preparationColor, background: "var(--warn-tint)", padding: "3px 8px", borderRadius: 4, fontWeight: 500 }}>{preparationLabel}</span>
         )}
         <span style={{ color: "var(--ink-faint)" }}>・</span>
         <span>{file.summaryStatus === "completed" ? "要約あり" : "要約まだ"}</span>
@@ -620,6 +636,7 @@ function metadataToManualFile(metadata: ManualMetadata): ManualFile {
     summary: metadata.summary || "",
     summaryStatus: metadata.summaryStatus || "not_started",
     summaryUpdatedAt: metadata.summaryUpdatedAt || "",
+    preparationStatus: metadata.preparationStatus || "not_started",
     textExtractionStatus: metadata.textExtractionStatus || "not_started"
   };
 }
