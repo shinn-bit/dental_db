@@ -25,7 +25,6 @@ const MANUAL_SECTIONS = [
 
 export function ManualGeneratorPanel() {
   const [theme, setTheme] = useState("");
-  const [purpose, setPurpose] = useState("");
 
   const [repositoryFiles, setRepositoryFiles] = useState<StoredFileMetadata[]>([]);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
@@ -94,7 +93,7 @@ export function ManualGeneratorPanel() {
       const retrieveRes = await fetch("/api/generate-manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: currentTheme, purpose, files })
+        body: JSON.stringify({ theme: currentTheme, files })
       });
       const { passages = [] } = retrieveRes.ok
         ? (await retrieveRes.json() as { passages: string[] })
@@ -108,7 +107,6 @@ export function ManualGeneratorPanel() {
 
       const prompt = [
         `テーマ: ${currentTheme}`,
-        purpose ? `用途: ${purpose}` : "",
         "",
         "以下の10項目構成で院内マニュアルを日本語で作成してください。",
         "各項目は「## 1. 病気の解説」のようにMarkdown見出し（##）で始め、その下に内容を記載してください。",
@@ -221,18 +219,6 @@ export function ManualGeneratorPanel() {
               value={theme}
               onChange={(e) => setTheme(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") generate(); }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: "block", fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", color: "var(--ink-soft)", marginBottom: 6 }}>
-              用途（任意）
-            </label>
-            <input
-              className="input"
-              placeholder="例: 新人研修、患者説明資料"
-              value={purpose}
-              onChange={(e) => setPurpose(e.target.value)}
             />
           </div>
 
