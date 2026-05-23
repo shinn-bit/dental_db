@@ -20,7 +20,6 @@ export function ManualGeneratorPanel() {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [content, setContent] = useState("");
-  const [docxBase64, setDocxBase64] = useState("");
   const [generatedTheme, setGeneratedTheme] = useState("");
 
   const selectedFiles = useMemo(
@@ -68,7 +67,7 @@ export function ManualGeneratorPanel() {
     setLoading(true);
     setNotice("");
     setContent("");
-    setDocxBase64("");
+    setGeneratedTheme("");
 
     const files = selectedFiles.map((f) => ({
       id: f.id,
@@ -78,17 +77,35 @@ export function ManualGeneratorPanel() {
       extractedTextKey: f.extractedTextKey
     }));
 
+    const currentTheme = theme.trim();
+
     try {
       const res = await fetch("/api/generate-manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: theme.trim(), purpose, files })
+        body: JSON.stringify({ theme: currentTheme, purpose, files })
       });
-      const data = (await res.json()) as { content?: string; docxBase64?: string; theme?: string; error?: string };
-      if (!res.ok) throw new Error(data.error || "生成に失敗しました");
-      setContent(data.content ?? "");
-      setDocxBase64(data.docxBase64 ?? "");
-      setGeneratedTheme(data.theme ?? theme.trim());
+
+      if (!res.ok) {
+        const errData = (await res.json()) as { error?: string };
+        throw new Error(errData.error || "生成に失敗しました");
+      }
+
+      // ストリーミングで読み込み
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("ストリームを取得できませんでした");
+
+      const decoder = new TextDecoder();
+      let accumulated = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        accumulated += decoder.decode(value, { stream: true });
+        setContent(accumulated);
+      }
+
+      setGeneratedTheme(currentTheme);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
     } finally {
@@ -96,18 +113,28 @@ export function ManualGeneratorPanel() {
     }
   }
 
-  function downloadDocx() {
-    if (!docxBase64) return;
-    const bytes = Uint8Array.from(atob(docxBase64), (c) => c.charCodeAt(0));
-    const blob = new Blob([bytes], {
-      type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-    });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${generatedTheme || "manual"}.docx`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function downloadDocx() {
+    if (!content || !generatedTheme) return;
+
+    try {
+      const res = await fetch("/api/generate-manual/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, theme: generatedTheme })
+      });
+
+      if (!res.ok) throw new Error("ダウンロードに失敗しました");
+
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${generatedTheme}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "ダウンロードに失敗しました");
+    }
   }
 
   return (
@@ -236,24 +263,32 @@ export function ManualGeneratorPanel() {
         </div>
 
         {/* Result */}
-        {loading ? (
-          <div className="row" style={{ padding: "28px 24px", color: "var(--ink-muted)", fontSize: 13, gap: 8 }}>
-            <span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
-            院内資料を参照してマニュアルを生成しています…
-          </div>
-        ) : content ? (
+        {content || loading ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
             <div className="between" style={{ padding: "14px 24px 10px", borderBottom: "1px solid var(--line-soft)" }}>
-              <span className="tiny soft" style={{ letterSpacing: "0.08em" }}>プレビュー</span>
-              <Button variant="secondary" onClick={downloadDocx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
-                <Download size={14} aria-hidden="true" />
-                Word (.docx) でダウンロード
-              </Button>
+              <span className="row" style={{ gap: 8, color: "var(--ink-muted)", fontSize: 13 }}>
+                {loading ? (
+                  <>
+                    <span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
+                    生成中…
+                  </>
+                ) : (
+                  <span className="tiny soft" style={{ letterSpacing: "0.08em" }}>プレビュー</span>
+                )}
+              </span>
+              {!loading && content ? (
+                <Button variant="secondary" onClick={downloadDocx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
+                  <Download size={14} aria-hidden="true" />
+                  Word (.docx) でダウンロード
+                </Button>
+              ) : null}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-              <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>
-                {generatedTheme}
-              </h1>
+              {generatedTheme ? (
+                <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>
+                  {generatedTheme}
+                </h1>
+              ) : null}
               <div className="prose">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>

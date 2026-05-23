@@ -1,11 +1,9 @@
-import {
-  RetrieveAndGenerateCommand,
-  type RetrievalFilter
-} from "@aws-sdk/client-bedrock-agent-runtime";
-import { NextResponse } from "next/server";
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
-import { createBedrockAgentRuntimeClient } from "@/lib/aws";
+import { RetrieveCommand } from "@aws-sdk/client-bedrock-agent-runtime";
+import { InvokeModelWithResponseStreamCommand } from "@aws-sdk/client-bedrock-runtime";
+import { createBedrockAgentRuntimeClient, createBedrockRuntimeClient } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
+
+export const maxDuration = 60;
 
 const MANUAL_SECTIONS = [
   "病気の解説",
@@ -39,26 +37,15 @@ export async function POST(request: Request) {
   const theme = body.theme?.trim();
 
   if (!theme) {
-    return NextResponse.json({ error: "テーマは必須です" }, { status: 400 });
+    return new Response(JSON.stringify({ error: "テーマは必須です" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 
   const knowledgeBaseId = requireEnv(appEnv.bedrockKnowledgeBaseId, "BEDROCK_KNOWLEDGE_BASE_ID");
   const modelArn = requireEnv(appEnv.bedrockModelArn, "BEDROCK_MODEL_ARN");
-
   const purpose = body.purpose?.trim() || "院内教育";
-  const sectionList = MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`).join("\n");
-
-  const queryText = [
-    `テーマ: ${theme}`,
-    `用途: ${purpose}`,
-    "",
-    "以下の10項目構成で院内マニュアルを日本語で作成してください。",
-    "各項目は「## 1. 病気の解説」のようにMarkdownの見出し（##）で始め、その下に内容を記載してください。",
-    "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式のチェックリスト箇条書きにしてください。",
-    "院内資料に記載のない情報は一般的な歯科知識で補完してください。",
-    "",
-    sectionList
-  ].join("\n");
 
   const selectedFiles = (body.files ?? []).filter(
     (f) => f.knowledgeBaseKey || f.summaryKey || f.extractedTextKey
@@ -70,135 +57,110 @@ export async function POST(request: Request) {
       f.extractedTextKey ? `s3://${appEnv.s3BucketName}/${f.extractedTextKey}` : ""
     ])
     .filter(Boolean);
-  const retrievalFilter = createSourceUriFilter(sourceUris);
 
+  const sectionList = MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`).join("\n");
+  const retrieveQuery = `${theme} ${purpose} ${sectionList}`;
+
+  // Step 1: KB からパッセージを取得（高速）
+  let passages = "";
   try {
-    const response = await createBedrockAgentRuntimeClient().send(
-      new RetrieveAndGenerateCommand({
-        input: { text: queryText },
-        retrieveAndGenerateConfiguration: {
-          type: "KNOWLEDGE_BASE",
-          knowledgeBaseConfiguration: {
-            knowledgeBaseId,
-            modelArn,
-            retrievalConfiguration: {
-              vectorSearchConfiguration: {
-                numberOfResults: 8,
-                ...(retrievalFilter ? { filter: retrievalFilter } : {})
-              }
-            },
-            generationConfiguration: {
-              promptTemplate: {
-                textPromptTemplate:
-                  "あなたは歯科医院の院内マニュアル作成AIです。以下の院内資料（検索結果）を参照し、指定されたテーマの院内マニュアルを日本語で作成してください。院内資料に記載のない情報は一般的な歯科知識で補完してください。\n\n院内資料:\n$search_results$\n\nリクエスト:\n$query$"
-              }
-            }
+    const retrieveResult = await createBedrockAgentRuntimeClient().send(
+      new RetrieveCommand({
+        knowledgeBaseId,
+        retrievalQuery: { text: retrieveQuery },
+        retrievalConfiguration: {
+          vectorSearchConfiguration: {
+            numberOfResults: 8,
+            ...(sourceUris.length > 0 ? { filter: buildFilter(sourceUris) } : {})
           }
         }
       })
     );
+    passages = (retrieveResult.retrievalResults ?? [])
+      .map((r) => r.content?.text ?? "")
+      .filter(Boolean)
+      .join("\n\n---\n\n");
+  } catch {
+    // 取得失敗時は一般知識のみで生成
+    passages = "（院内資料の検索に失敗しました。一般的な歯科知識で補完します）";
+  }
 
-    const content = response.output?.text ?? "";
+  const userPrompt = [
+    `テーマ: ${theme}`,
+    `用途: ${purpose}`,
+    "",
+    "以下の院内資料を参照し、このテーマの院内マニュアルを10項目構成で作成してください。",
+    "各項目は「## 1. 病気の解説」のようなMarkdown見出し（##）で始め、内容を記載してください。",
+    "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式の箇条書きにしてください。",
+    "資料にない情報は一般的な歯科知識で補完してください。",
+    "",
+    "【院内資料】",
+    passages,
+    "",
+    "【構成】",
+    sectionList
+  ].join("\n");
 
-    const docxUint8 = await Packer.toBuffer(
-      new Document({
-        sections: [{ properties: {}, children: buildDocxChildren(theme, content) }]
+  // Step 2: Claude をストリーミング呼び出し
+  const modelInput = {
+    anthropic_version: "bedrock-2023-05-31",
+    max_tokens: 4096,
+    system: "あなたは歯科医院の院内マニュアル作成AIです。指定された10項目構成で、日本語で院内マニュアルを作成してください。",
+    messages: [
+      { role: "user", content: [{ type: "text", text: userPrompt }] }
+    ]
+  };
+
+  try {
+    const streamResult = await createBedrockRuntimeClient().send(
+      new InvokeModelWithResponseStreamCommand({
+        modelId: modelArn,
+        contentType: "application/json",
+        accept: "application/json",
+        body: new TextEncoder().encode(JSON.stringify(modelInput))
       })
     );
-    const docxBase64 = Buffer.from(docxUint8).toString("base64");
 
-    return NextResponse.json({ content, docxBase64, theme });
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const event of streamResult.body ?? []) {
+            if (event.chunk?.bytes) {
+              const decoded = JSON.parse(new TextDecoder().decode(event.chunk.bytes)) as {
+                type: string;
+                delta?: { type: string; text?: string };
+              };
+              if (decoded.type === "content_block_delta" && decoded.delta?.text) {
+                controller.enqueue(encoder.encode(decoded.delta.text));
+              }
+            }
+          }
+        } finally {
+          controller.close();
+        }
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "X-Manual-Theme": encodeURIComponent(theme),
+        "Cache-Control": "no-cache"
+      }
+    });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: msg }, { status: 500 });
+    return new Response(JSON.stringify({ error: msg }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
   }
 }
 
-function buildDocxChildren(theme: string, markdown: string): Paragraph[] {
-  const children: Paragraph[] = [
-    new Paragraph({
-      children: [new TextRun({ text: theme, bold: true, size: 40 })],
-      spacing: { after: 400 }
-    })
-  ];
-
-  for (const line of markdown.split("\n")) {
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      children.push(new Paragraph({ text: "", spacing: { after: 60 } }));
-      continue;
-    }
-
-    if (trimmed.startsWith("## ")) {
-      children.push(
-        new Paragraph({
-          text: trimmed.slice(3),
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 400, after: 160 }
-        })
-      );
-    } else if (trimmed.startsWith("### ")) {
-      children.push(
-        new Paragraph({
-          text: trimmed.slice(4),
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 200, after: 100 }
-        })
-      );
-    } else if (/^[-*]\s+\[\s?[x ]?\s?\]/.test(trimmed)) {
-      const text = trimmed.replace(/^[-*]\s+\[\s?[x ]?\s?\]\s*/, "");
-      children.push(
-        new Paragraph({
-          children: [new TextRun({ text: `□  ${text}` })],
-          indent: { left: 360 },
-          spacing: { after: 80 }
-        })
-      );
-    } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      children.push(
-        new Paragraph({
-          text: trimmed.slice(2),
-          bullet: { level: 0 },
-          spacing: { after: 60 }
-        })
-      );
-    } else {
-      children.push(
-        new Paragraph({
-          children: parseInline(trimmed),
-          spacing: { after: 120 }
-        })
-      );
-    }
-  }
-
-  return children;
-}
-
-function parseInline(text: string): TextRun[] {
-  const runs: TextRun[] = [];
-  const re = /\*\*(.+?)\*\*/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) runs.push(new TextRun({ text: text.slice(last, m.index) }));
-    runs.push(new TextRun({ text: m[1], bold: true }));
-    last = m.index + m[0].length;
-  }
-
-  if (last < text.length) runs.push(new TextRun({ text: text.slice(last) }));
-  return runs.length > 0 ? runs : [new TextRun({ text })];
-}
-
-function createSourceUriFilter(sourceUris: string[]): RetrievalFilter | undefined {
-  const uris = sourceUris.filter(Boolean);
-  if (uris.length === 0) return undefined;
-
+function buildFilter(uris: string[]) {
   const filters = uris.map((uri) => ({
     equals: { key: "x-amz-bedrock-kb-source-uri", value: uri }
   }));
-
   return filters.length === 1 ? filters[0] : { orAll: filters };
 }
