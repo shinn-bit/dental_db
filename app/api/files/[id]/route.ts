@@ -1,8 +1,14 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+﻿import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { NextResponse } from "next/server";
 import { createS3Client, createTextractS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
-import { createMetadataS3Key, createTextractInputS3Key, type ManualMetadata } from "@/lib/manuals";
+import {
+  createMetadataS3Key,
+  createTextractInputS3Key,
+  normalizeFileMetadata,
+  type FileMetadataInput,
+  type StoredFileMetadata
+} from "@/lib/file-assets";
 import { parseS3Json } from "@/lib/s3-json";
 
 async function bodyToString(body: unknown) {
@@ -23,7 +29,7 @@ async function getMetadata(id: string) {
     })
   );
   const text = await bodyToString(response.Body);
-  return parseS3Json<ManualMetadata>(text);
+  return normalizeFileMetadata(parseS3Json<FileMetadataInput>(text));
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -37,16 +43,11 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params;
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   const current = await getMetadata(id);
-  const body = (await request.json()) as Partial<ManualMetadata>;
+  const body = (await request.json()) as FileMetadataInput;
 
-  const nextMetadata: ManualMetadata = {
+  const nextMetadata: StoredFileMetadata = {
     ...current,
-    categoryIds: body.categoryIds || current.categoryIds,
-    categories: body.categories || current.categories,
-    clinicalAreaIds: body.clinicalAreaIds || current.clinicalAreaIds,
-    clinicalAreas: body.clinicalAreas || current.clinicalAreas,
-    roleIds: body.roleIds || current.roleIds,
-    roles: body.roles || current.roles,
+    folderId: body.folderId ?? current.folderId,
     tags: body.tags || [],
     version: body.version || "",
     memo: body.memo || ""
@@ -118,3 +119,4 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
   return NextResponse.json({ deleted: true, id });
 }
+

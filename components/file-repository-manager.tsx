@@ -1,56 +1,38 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Clipboard, Edit, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import { Button, FileSpine, FieldLabel } from "@/components/ui";
-import { SelectableChip } from "@/components/selectable-chip";
-import { useMasterSettings } from "@/hooks/use-master-settings";
-import { type MasterGroupKey } from "@/lib/master-settings";
-import { formatFileSize, getThumbnailLabel, type ManualMetadata } from "@/lib/manuals";
+import { formatFileSize, getThumbnailLabel, type StoredFileMetadata } from "@/lib/file-assets";
 
-type ManualFile = {
+type RepositoryFile = {
   id: string;
   name: string;
   contentType: string;
   date: string;
   sizeLabel: string;
   thumbnailLabel: string;
-  categoryIds: string[];
-  categories: string[];
-  clinicalAreaIds: string[];
-  areas: string[];
-  roleIds: string[];
-  roles: string[];
   tags: string[];
   version: string;
   memo: string;
   summary: string;
-  summaryStatus: ManualMetadata["summaryStatus"];
+  summaryStatus: StoredFileMetadata["summaryStatus"];
   summaryUpdatedAt: string;
-  preparationStatus: ManualMetadata["preparationStatus"];
-  textExtractionStatus: ManualMetadata["textExtractionStatus"];
+  preparationStatus: StoredFileMetadata["preparationStatus"];
+  textExtractionStatus: StoredFileMetadata["textExtractionStatus"];
 };
 
-type SelectionState = Record<MasterGroupKey, string[]>;
-type DetailDraft = SelectionState & {
+type DetailDraft = {
   tags: string;
   version: string;
   memo: string;
 };
 
-const initialSelection: SelectionState = {
-  categories: ["treatment-manual"],
-  clinicalAreas: ["periodontal", "common"],
-  roles: ["hygienist"]
-};
-
-export function ManualsManager() {
-  const { settings } = useMasterSettings();
+export function FileRepositoryManager() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [files, setFiles] = useState<ManualFile[]>([]);
-  const [selection, setSelection] = useState<SelectionState>(initialSelection);
+  const [files, setFiles] = useState<RepositoryFile[]>([]);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [tags, setTags] = useState("");
@@ -62,11 +44,11 @@ export function ManualsManager() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState("");
   const [syncing, setSyncing] = useState(false);
-  const [selectedDetail, setSelectedDetail] = useState<ManualFile | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<RepositoryFile | null>(null);
   const [detailDraft, setDetailDraft] = useState<DetailDraft | null>(null);
   const [detailSaving, setDetailSaving] = useState(false);
-  const [sourceViewerFile, setSourceViewerFile] = useState<ManualFile | null>(null);
-  const [selectedSummary, setSelectedSummary] = useState<ManualFile | null>(null);
+  const [sourceViewerFile, setSourceViewerFile] = useState<RepositoryFile | null>(null);
+  const [selectedSummary, setSelectedSummary] = useState<RepositoryFile | null>(null);
   const [summaryDraft, setSummaryDraft] = useState("");
   const [summaryEditing, setSummaryEditing] = useState(false);
   const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
@@ -74,15 +56,6 @@ export function ManualsManager() {
   const [summaryCopied, setSummaryCopied] = useState(false);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
-
-  const activeSettings = useMemo(
-    () => ({
-      categories: settings.categories.filter((item) => item.active),
-      clinicalAreas: settings.clinicalAreas.filter((item) => item.active),
-      roles: settings.roles.filter((item) => item.active)
-    }),
-    [settings]
-  );
 
   const filteredFiles = useMemo(
     () =>
@@ -110,8 +83,8 @@ export function ManualsManager() {
         const data = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(data.error || "S3一覧を読み込めませんでした。");
       }
-      const data = (await response.json()) as { files: ManualMetadata[] };
-      setFiles(data.files.map(metadataToManualFile));
+      const data = (await response.json()) as { files: StoredFileMetadata[] };
+      setFiles(data.files.map(metadataToRepositoryFile));
     } catch (error) {
       if (options.updateNotice !== false) {
         const message = error instanceof Error ? error.message : "S3一覧を読み込めませんでした。";
@@ -158,21 +131,6 @@ export function ManualsManager() {
     return () => window.clearInterval(timer);
   }, [files]);
 
-  function toggle(group: MasterGroupKey, id: string) {
-    setSelection((current) => ({
-      ...current,
-      [group]: current[group].includes(id)
-        ? current[group].filter((itemId) => itemId !== id)
-        : [...current[group], id]
-    }));
-  }
-
-  function getLabels(group: MasterGroupKey, ids: string[]) {
-    return ids
-      .map((id) => settings[group].find((item) => item.id === id)?.label)
-      .filter((label): label is string => Boolean(label));
-  }
-
   function addSelectedFiles(nextFiles: FileList | File[]) {
     const incoming = Array.from(nextFiles).filter((file) => file.size > 0);
     if (incoming.length === 0) {
@@ -191,20 +149,12 @@ export function ManualsManager() {
       return;
     }
 
-    const categories = getLabels("categories", selection.categories);
-    const areas = getLabels("clinicalAreas", selection.clinicalAreas);
-    const roles = getLabels("roles", selection.roles);
-    if (categories.length === 0 || areas.length === 0 || roles.length === 0) {
-      setNotice("種類、診療領域、読む人をそれぞれ1つ以上選択してください。");
-      return;
-    }
-
     const tagList = tags.split(",").map((tag) => tag.trim()).filter(Boolean);
     setIsUploading(true);
     setNotice("S3へアップロードしています。");
 
     try {
-      const uploaded: ManualFile[] = [];
+      const uploaded: RepositoryFile[] = [];
       for (const file of selectedFiles) {
         const uploadUrlResponse = await fetch("/api/upload-url", {
           method: "POST",
@@ -234,12 +184,6 @@ export function ManualsManager() {
             size: file.size,
             sizeLabel: formatFileSize(file.size),
             thumbnailLabel: getThumbnailLabel(file.name),
-            categoryIds: selection.categories,
-            categories,
-            clinicalAreaIds: selection.clinicalAreas,
-            clinicalAreas: areas,
-            roleIds: selection.roles,
-            roles,
             tags: tagList,
             version: version.trim(),
             memo: memo.trim(),
@@ -249,15 +193,15 @@ export function ManualsManager() {
         if (!metadataResponse.ok) {
           throw new Error("Failed to save metadata");
         }
-        const metadataData = (await metadataResponse.json()) as { file: ManualMetadata };
-        uploaded.push(metadataToManualFile(metadataData.file));
+        const metadataData = (await metadataResponse.json()) as { file: StoredFileMetadata };
+        uploaded.push(metadataToRepositoryFile(metadataData.file));
       }
       setFiles((current) => [...uploaded, ...current]);
       setSelectedFiles([]);
       setTags("");
       setVersion("");
       setMemo("");
-      setNotice(`${uploaded.length}件を本棚に入れました。`);
+      setNotice(`${uploaded.length}件を資料庫に追加しました。`);
     } catch {
       setNotice("アップロードに失敗しました。SSO期限やS3設定を確認してください。");
     } finally {
@@ -265,7 +209,7 @@ export function ManualsManager() {
     }
   }
 
-  async function deleteFile(file: ManualFile) {
+  async function deleteFile(file: RepositoryFile) {
     if (!window.confirm(`${file.name} を削除します。よろしいですか？`)) {
       return;
     }
@@ -285,7 +229,7 @@ export function ManualsManager() {
     }
   }
 
-  async function openOrCreateSummary(file: ManualFile) {
+  async function openOrCreateSummary(file: RepositoryFile) {
     if (file.preparationStatus !== "completed") {
       setBlockedSummaryId(file.id);
       setNotice("");
@@ -298,11 +242,11 @@ export function ManualsManager() {
     try {
       const method = file.summaryStatus === "completed" ? "GET" : "POST";
       const response = await fetch(`/api/files/${file.id}/summary`, { method, cache: "no-store" });
-      const data = (await response.json()) as { summary?: string; file?: ManualMetadata; error?: string };
+      const data = (await response.json()) as { summary?: string; file?: StoredFileMetadata; error?: string };
       if (!response.ok) {
         throw new Error(data.error || "要約の取得または作成に失敗しました。");
       }
-      const nextFile = metadataToManualFile(data.file as ManualMetadata);
+      const nextFile = metadataToRepositoryFile(data.file as StoredFileMetadata);
       setFiles((current) => current.map((item) => (item.id === nextFile.id ? nextFile : item)));
       if (nextFile.summaryStatus === "completed") {
         setSelectedSummary(nextFile);
@@ -330,11 +274,11 @@ export function ManualsManager() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ summary: summaryDraft })
       });
-      const data = (await response.json()) as { summary?: string; file?: ManualMetadata; error?: string };
+      const data = (await response.json()) as { summary?: string; file?: StoredFileMetadata; error?: string };
       if (!response.ok) {
         throw new Error(data.error || "要約の保存に失敗しました。");
       }
-      const nextFile = metadataToManualFile(data.file as ManualMetadata);
+      const nextFile = metadataToRepositoryFile(data.file as StoredFileMetadata);
       setFiles((current) => current.map((item) => (item.id === nextFile.id ? nextFile : item)));
       setSelectedSummary(nextFile);
       setSummaryEditing(false);
@@ -376,43 +320,17 @@ export function ManualsManager() {
     }
   }
 
-  function openDetail(file: ManualFile) {
+  function openDetail(file: RepositoryFile) {
     setSelectedDetail(file);
     setDetailDraft({
-      categories: file.categoryIds,
-      clinicalAreas: file.clinicalAreaIds,
-      roles: file.roleIds,
       tags: file.tags.join(", "),
       version: file.version,
       memo: file.memo
     });
   }
 
-  function toggleDetail(group: MasterGroupKey, id: string) {
-    setDetailDraft((current) => {
-      if (!current) {
-        return current;
-      }
-      const selectedIds = current[group];
-      return {
-        ...current,
-        [group]: selectedIds.includes(id)
-          ? selectedIds.filter((itemId) => itemId !== id)
-          : [...selectedIds, id]
-      };
-    });
-  }
-
   async function saveDetail() {
     if (!selectedDetail || !detailDraft) {
-      return;
-    }
-
-    const categories = getLabels("categories", detailDraft.categories);
-    const areas = getLabels("clinicalAreas", detailDraft.clinicalAreas);
-    const roles = getLabels("roles", detailDraft.roles);
-    if (categories.length === 0 || areas.length === 0 || roles.length === 0) {
-      setNotice("種類、診療領域、読む人をそれぞれ1つ以上選択してください。");
       return;
     }
 
@@ -422,22 +340,16 @@ export function ManualsManager() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          categoryIds: detailDraft.categories,
-          categories,
-          clinicalAreaIds: detailDraft.clinicalAreas,
-          clinicalAreas: areas,
-          roleIds: detailDraft.roles,
-          roles,
           tags: detailDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
           version: detailDraft.version.trim(),
           memo: detailDraft.memo.trim()
         })
       });
-      const data = (await response.json()) as { file?: ManualMetadata; error?: string };
+      const data = (await response.json()) as { file?: StoredFileMetadata; error?: string };
       if (!response.ok || !data.file) {
         throw new Error(data.error || "詳細を保存できませんでした。");
       }
-      const nextFile = metadataToManualFile(data.file);
+      const nextFile = metadataToRepositoryFile(data.file);
       setFiles((current) => current.map((file) => (file.id === nextFile.id ? nextFile : file)));
       setSelectedDetail(nextFile);
       setNotice("詳細を保存しました。");
@@ -453,8 +365,8 @@ export function ManualsManager() {
       <div style={{ display: "grid", gridTemplateColumns: "440px minmax(0,1fr)", gap: 24, alignItems: "stretch", minHeight: 560 }}>
         <section className="panel" style={{ display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
           <div className="panel-head" style={{ flexShrink: 0 }}>
-            <span className="panel-title">資料を追加する</span>
-            <span className="panel-sub">PDF・Word・テキスト</span>
+            <span className="panel-title">ファイルを追加する</span>
+            <span className="panel-sub">PDF・Word・テキスト・画像・動画</span>
           </div>
           <div className="panel-pad" style={{ paddingTop: 18, overflowY: "auto", flex: 1, minHeight: 0 }}>
             <div
@@ -471,7 +383,7 @@ export function ManualsManager() {
               <div style={{ color: "var(--navy)", display: "inline-flex" }}><Upload size={28} aria-hidden="true" /></div>
               <div className="serif" style={{ fontSize: 16, marginTop: 10, color: "var(--navy-deep)", fontWeight: 600, letterSpacing: "0.04em" }}>ここにファイルを置く</div>
               <div className="small soft" style={{ marginTop: 4 }}>または下のボタンで選択</div>
-              <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} accept=".pdf,.doc,.docx,.txt,.md" onChange={(event) => {
+              <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} accept=".pdf,.doc,.docx,.txt,.md,image/*,video/*" onChange={(event) => {
                 if (event.target.files) {
                   addSelectedFiles(event.target.files);
                 }
@@ -504,13 +416,6 @@ export function ManualsManager() {
             ) : null}
 
             <div className="divider" />
-            <SelectorGroup title="種類" items={activeSettings.categories} selectedIds={selection.categories} onToggle={(id) => toggle("categories", id)} />
-            <div style={{ height: 18 }} />
-            <SelectorGroup title="診療領域" items={activeSettings.clinicalAreas} selectedIds={selection.clinicalAreas} onToggle={(id) => toggle("clinicalAreas", id)} />
-            <div style={{ height: 18 }} />
-            <SelectorGroup title="読む人" items={activeSettings.roles} selectedIds={selection.roles} onToggle={(id) => toggle("roles", id)} />
-
-            <div style={{ height: 20 }} />
             <FieldLabel>タグ（任意）</FieldLabel>
             <input className="input" placeholder="カンマで区切って入力" value={tags} onChange={(event) => setTags(event.target.value)} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
@@ -526,16 +431,16 @@ export function ManualsManager() {
             {notice ? <p className="tag accent" style={{ marginTop: 14 }}>{notice}</p> : null}
             <Button style={{ width: "100%", marginTop: 20, height: 44 }} onClick={registerFiles} disabled={isUploading}>
               <Upload size={15} aria-hidden="true" />
-              {selectedFiles.length > 0 ? `${selectedFiles.length}件を本棚に入れる` : "本棚に入れる"}
+              {selectedFiles.length > 0 ? `${selectedFiles.length}件を資料庫に追加` : "資料庫に追加"}
             </Button>
-            <div className="tiny soft" style={{ textAlign: "center", marginTop: 8, letterSpacing: "0.06em" }}>追加後、AIが自動で内容を読み取ります</div>
+            <div className="tiny soft" style={{ textAlign: "center", marginTop: 8, letterSpacing: "0.06em" }}>対応ファイルは追加後にAIが自動で内容を読み取ります</div>
           </div>
         </section>
 
         <section className="panel" style={{ overflow: "hidden", display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div className="panel-head" style={{ flexWrap: "wrap", flexShrink: 0 }}>
             <div className="stack">
-              <span className="panel-title">本棚</span>
+              <span className="panel-title">資料庫</span>
               <span className="panel-sub">{isLoadingFiles ? "S3から一覧を読み込み中です。" : "追加した順に並んでいます"}</span>
               {syncStatus ? <span className="panel-sub" style={{ color: "var(--navy-deep)" }}>{syncStatus}</span> : null}
             </div>
@@ -565,12 +470,12 @@ export function ManualsManager() {
           {filteredFiles.length === 0 ? (
             <div style={{ padding: "60px 24px", textAlign: "center" }}>
               <div className="serif" style={{ fontSize: 22, color: "var(--ink-muted)", marginBottom: 8 }}>該当する資料はありません</div>
-              <div className="small soft">検索条件を変えるか、左から資料を追加してください。</div>
+              <div className="small soft">検索条件を変えるか、左からファイルを追加してください。</div>
             </div>
           ) : (
             <div style={{ padding: 24, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 18, overflowY: "auto", flex: 1, minHeight: 0 }}>
               {filteredFiles.map((file) => (
-                <ManualCard
+                <FileCard
                   key={file.id}
                   file={file}
                   processing={summaryProcessingId === file.id}
@@ -590,9 +495,7 @@ export function ManualsManager() {
         <DetailOverlay
           file={selectedDetail}
           draft={detailDraft}
-          settings={activeSettings}
           saving={detailSaving}
-          onToggle={toggleDetail}
           onDraft={setDetailDraft}
           onSave={saveDetail}
           onOpenSource={() => setSourceViewerFile(selectedDetail)}
@@ -622,20 +525,7 @@ export function ManualsManager() {
   );
 }
 
-function SelectorGroup({ title, items, selectedIds, onToggle }: { title: string; items: { id: string; label: string }[]; selectedIds: string[]; onToggle: (id: string) => void }) {
-  return (
-    <div>
-      <FieldLabel>{title}</FieldLabel>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {items.map((item) => (
-          <SelectableChip key={item.id} label={item.label} selected={selectedIds.includes(item.id)} onToggle={() => onToggle(item.id)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function ManualCard({ file, processing, blocked, deleting, onSummary, onDetail, onDelete }: { file: ManualFile; processing: boolean; blocked: boolean; deleting: boolean; onSummary: () => void; onDetail: () => void; onDelete: () => void }) {
+function FileCard({ file, processing, blocked, deleting, onSummary, onDetail, onDelete }: { file: RepositoryFile; processing: boolean; blocked: boolean; deleting: boolean; onSummary: () => void; onDetail: () => void; onDelete: () => void }) {
   const needsOcr = file.textExtractionStatus === "ocr_required";
   const canCreateSummary = file.preparationStatus === "completed";
   const summaryInProgress = file.summaryStatus === "processing" || processing;
@@ -662,11 +552,11 @@ function ManualCard({ file, processing, blocked, deleting, onSummary, onDetail, 
           {file.memo ? <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.6, marginTop: 2 }}>{file.memo}</div> : null}
         </div>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-        {file.categories.map((item) => <span className="tag" key={item}>{item}</span>)}
-        {file.areas.map((item) => <span className="tag ghost" key={item}>{item}</span>)}
-        {file.roles.slice(0, 2).map((item) => <span className="tag ghost" key={item}>{item}</span>)}
-      </div>
+      {file.tags.length > 0 ? (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {file.tags.map((item) => <span className="tag" key={item}>{item}</span>)}
+        </div>
+      ) : null}
       <div className="row" style={{ gap: 4, fontSize: 11, color: "var(--ink-muted)", flexWrap: "wrap" }}>
         {file.preparationStatus === "completed" ? (
           <span className="row" style={{ gap: 5 }}><span className="dot ok" />{preparationLabel}</span>
@@ -709,19 +599,15 @@ function ManualCard({ file, processing, blocked, deleting, onSummary, onDetail, 
 function DetailOverlay({
   file,
   draft,
-  settings,
   saving,
-  onToggle,
   onDraft,
   onSave,
   onOpenSource,
   onClose
 }: {
-  file: ManualFile;
+  file: RepositoryFile;
   draft: DetailDraft;
-  settings: Record<MasterGroupKey, { id: string; label: string }[]>;
   saving: boolean;
-  onToggle: (group: MasterGroupKey, id: string) => void;
   onDraft: React.Dispatch<React.SetStateAction<DetailDraft | null>>;
   onSave: () => void;
   onOpenSource: () => void;
@@ -759,14 +645,7 @@ function DetailOverlay({
               原本を見る
             </Button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-            <DetailSelector title="種類" items={settings.categories} selectedIds={draft.categories} onToggle={(id) => onToggle("categories", id)} />
-            <DetailSelector title="読む人" items={settings.roles} selectedIds={draft.roles} onToggle={(id) => onToggle("roles", id)} />
-          </div>
-          <div style={{ marginTop: 18 }}>
-            <DetailSelector title="診療領域" items={settings.clinicalAreas} selectedIds={draft.clinicalAreas} onToggle={(id) => onToggle("clinicalAreas", id)} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 20 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <div>
               <FieldLabel>タグ</FieldLabel>
               <input className="input" value={draft.tags} placeholder="カンマで区切って入力" onChange={(event) => onDraft((current) => current ? { ...current, tags: event.target.value } : current)} />
@@ -795,7 +674,7 @@ function DetailOverlay({
   );
 }
 
-function SourceViewerOverlay({ file, onClose }: { file: ManualFile; onClose: () => void }) {
+function SourceViewerOverlay({ file, onClose }: { file: RepositoryFile; onClose: () => void }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [failed, setFailed] = useState(false);
 
@@ -861,6 +740,8 @@ function SourceViewerOverlay({ file, onClose }: { file: ManualFile; onClose: () 
             file.contentType.startsWith("image/") ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", background: "#fff" }} />
+            ) : file.contentType.startsWith("video/") ? (
+              <video src={previewUrl} controls style={{ width: "100%", height: "100%", background: "#000" }} />
             ) : (
               <iframe title={`${file.name} source`} src={previewUrl} style={{ width: "100%", height: "100%", border: 0, background: "#fff" }} />
             )
@@ -876,20 +757,7 @@ function SourceViewerOverlay({ file, onClose }: { file: ManualFile; onClose: () 
   );
 }
 
-function DetailSelector({ title, items, selectedIds, onToggle }: { title: string; items: { id: string; label: string }[]; selectedIds: string[]; onToggle: (id: string) => void }) {
-  return (
-    <div>
-      <FieldLabel>{title}</FieldLabel>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {items.map((item) => (
-          <SelectableChip key={item.id} label={item.label} selected={selectedIds.includes(item.id)} onToggle={() => onToggle(item.id)} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function FilePreview({ file }: { file: ManualFile }) {
+function FilePreview({ file }: { file: RepositoryFile }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [failed, setFailed] = useState(false);
   const isPdf = file.contentType.includes("pdf") || file.name.toLowerCase().endsWith(".pdf");
@@ -982,7 +850,7 @@ function FilePreview({ file }: { file: ManualFile }) {
   );
 }
 
-function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onEdit, onSave, onCopy, onClose }: { file: ManualFile; draft: string; editing: boolean; copied: boolean; processing: boolean; onDraft: (value: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onClose: () => void }) {
+function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onEdit, onSave, onCopy, onClose }: { file: RepositoryFile; draft: string; editing: boolean; copied: boolean; processing: boolean; onDraft: (value: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onClose: () => void }) {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
@@ -1009,11 +877,11 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
               <span className="tiny soft">{file.summaryUpdatedAt ? `最終更新 ${formatDisplayDate(file.summaryUpdatedAt)}` : "最終更新 —"}</span>
             </div>
             <h2 className="serif truncate" style={{ margin: "4px 0 2px", fontSize: 20, fontWeight: 600, color: "var(--navy-deep)", letterSpacing: "0.04em" }}>{file.name.replace(/\.[^.]+$/, "")}</h2>
-            <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-              {file.categories.map((item) => <span className="tag" key={item}>{item}</span>)}
-              {file.areas.map((item) => <span className="tag ghost" key={item}>{item}</span>)}
-              {file.roles.map((item) => <span className="tag ghost" key={item}>{item}</span>)}
-            </div>
+            {file.tags.length > 0 ? (
+              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+                {file.tags.map((item) => <span className="tag" key={item}>{item}</span>)}
+              </div>
+            ) : null}
           </div>
           <div className="row" style={{ gap: 6 }}>
             <Button variant="secondary" size="sm" onClick={onCopy}>{copied ? <Check size={13} /> : <Clipboard size={13} />}{copied ? "コピーしました" : "コピー"}</Button>
@@ -1024,12 +892,10 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
         <div style={{ display: "grid", gridTemplateColumns: "260px 1fr", flex: 1, overflow: "hidden" }}>
           <aside style={{ borderRight: "1px solid var(--line)", padding: "24px 22px", background: "var(--panel-deep)", overflowY: "auto" }}>
             <div className="tiny" style={{ letterSpacing: "0.18em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 10 }}>この資料について</div>
-            <MetaRow label="種類" value={file.categories.join("・")} />
-            <MetaRow label="診療領域" value={file.areas.join("・")} />
-            <MetaRow label="読む人" value={file.roles.join("・")} />
             <MetaRow label="版数" value={file.version || "—"} />
             <MetaRow label="ファイル" value={`${file.thumbnailLabel} ・ ${file.sizeLabel}`} />
             <MetaRow label="追加日" value={file.date} />
+            {file.tags.length > 0 ? <MetaRow label="タグ" value={file.tags.join("・")} /> : null}
             {file.memo ? <><div className="divider" style={{ margin: "16px 0" }} /><div className="tiny" style={{ letterSpacing: "0.18em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>メモ</div><p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.7, margin: 0 }}>{file.memo}</p></> : null}
           </aside>
           <div style={{ overflowY: "auto", padding: "32px 44px" }}>
@@ -1050,7 +916,7 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function metadataToManualFile(metadata: ManualMetadata): ManualFile {
+function metadataToRepositoryFile(metadata: StoredFileMetadata): RepositoryFile {
   return {
     id: metadata.id,
     name: metadata.fileName,
@@ -1058,13 +924,7 @@ function metadataToManualFile(metadata: ManualMetadata): ManualFile {
     date: formatDisplayDate(metadata.uploadedAt),
     sizeLabel: metadata.sizeLabel,
     thumbnailLabel: metadata.thumbnailLabel,
-    categoryIds: metadata.categoryIds || [],
-    categories: metadata.categories,
-    clinicalAreaIds: metadata.clinicalAreaIds || [],
-    areas: metadata.clinicalAreas,
-    roleIds: metadata.roleIds || [],
-    roles: metadata.roles,
-    tags: metadata.tags,
+    tags: metadata.tags || [],
     version: metadata.version,
     memo: metadata.memo,
     summary: metadata.summary || "",
@@ -1085,3 +945,5 @@ function formatDisplayDate(value: string) {
     hour12: false
   }).format(new Date(value)).replace(/\//g, "-");
 }
+
+

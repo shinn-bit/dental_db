@@ -1,10 +1,10 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+﻿import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-error";
 import { createS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
-import { createManualS3Key } from "@/lib/manuals";
+import { createFileAssetS3Key } from "@/lib/file-assets";
 
 type UploadUrlRequest = {
   fileName?: string;
@@ -23,7 +23,7 @@ export async function POST(request: Request) {
     const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
     const id = crypto.randomUUID();
     const contentType = body.contentType || "application/octet-stream";
-    const s3Key = createManualS3Key(appEnv.s3ManualPrefix, id, fileName);
+    const s3Key = createFileAssetS3Key(appEnv.s3FilePrefix, id, fileName);
 
     const command = new PutObjectCommand({
       Bucket: bucket,
@@ -42,3 +42,4 @@ export async function POST(request: Request) {
     return apiErrorResponse(error, "S3アップロードURLを作成できませんでした");
   }
 }
+

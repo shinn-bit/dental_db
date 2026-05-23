@@ -8,14 +8,17 @@ import { appEnv, requireEnv } from "@/lib/env";
 
 type ChatRequest = {
   message?: string;
-  manuals?: Array<{
+  files?: ChatSourceFile[];
+  manuals?: ChatSourceFile[];
+};
+
+type ChatSourceFile = {
     id?: string;
     fileName?: string;
     s3Key?: string;
     summaryKey?: string;
     knowledgeBaseKey?: string;
     extractedTextKey?: string;
-  }>;
 };
 
 export async function POST(request: Request) {
@@ -28,30 +31,30 @@ export async function POST(request: Request) {
 
   const knowledgeBaseId = requireEnv(appEnv.bedrockKnowledgeBaseId, "BEDROCK_KNOWLEDGE_BASE_ID");
   const modelArn = requireEnv(appEnv.bedrockModelArn, "BEDROCK_MODEL_ARN");
-  const selectedManuals = (body.manuals || []).filter(
-    (manual) => manual.fileName || manual.knowledgeBaseKey || manual.summaryKey || manual.extractedTextKey
+  const selectedFiles = (body.files || body.manuals || []).filter(
+    (file) => file.fileName || file.knowledgeBaseKey || file.summaryKey || file.extractedTextKey
   );
-  const sourceUris = selectedManuals
-    .flatMap((manual) => [
-      manual.knowledgeBaseKey
-        ? `s3://${appEnv.s3BucketName}/${manual.knowledgeBaseKey}`
-        : manual.summaryKey
-          ? `s3://${appEnv.s3BucketName}/${manual.summaryKey}`
+  const sourceUris = selectedFiles
+    .flatMap((file) => [
+      file.knowledgeBaseKey
+        ? `s3://${appEnv.s3BucketName}/${file.knowledgeBaseKey}`
+        : file.summaryKey
+          ? `s3://${appEnv.s3BucketName}/${file.summaryKey}`
           : "",
-      manual.extractedTextKey ? `s3://${appEnv.s3BucketName}/${manual.extractedTextKey}` : ""
+      file.extractedTextKey ? `s3://${appEnv.s3BucketName}/${file.extractedTextKey}` : ""
     ])
     .filter(Boolean);
   const retrievalFilter = createSourceUriFilter(sourceUris);
-  const manualContext =
-    selectedManuals.length > 0
-      ? `\n\n対象資料:\n${selectedManuals
+  const fileContext =
+    selectedFiles.length > 0
+      ? `\n\n対象資料:\n${selectedFiles
         .map(
-          (manual, index) =>
-            `${index + 1}. ${manual.fileName || "名称未設定"} (${manual.knowledgeBaseKey || manual.summaryKey || manual.extractedTextKey || ""})`
+          (file, index) =>
+            `${index + 1}. ${file.fileName || "名称未設定"} (${file.knowledgeBaseKey || file.summaryKey || file.extractedTextKey || ""})`
         )
           .join("\n")}\n\n上記の対象資料を優先して参照してください。対象資料に該当情報がない場合は、その旨を明記してください。`
       : "";
-  const queryText = `${message}${manualContext}`;
+  const queryText = `${message}${fileContext}`;
 
   try {
     const response = await createBedrockAgentRuntimeClient().send(
@@ -73,7 +76,7 @@ export async function POST(request: Request) {
             generationConfiguration: {
               promptTemplate: {
                 textPromptTemplate:
-                  "あなたは歯科医院の院内マニュアルだけを参照して回答するAIアシスタントです。検索結果に書かれている内容だけを根拠にしてください。一般知識、推測、外部知識、参考文献の補完は禁止です。検索結果に根拠がない場合は「選択された資料内では確認できません」とだけ明確に伝えてください。回答は現場スタッフ向けに簡潔な日本語にしてください。\n\n検索結果:\n$search_results$\n\n質問:\n$query$"
+                  "あなたは歯科医院の院内ナレッジだけを参照して回答するAIアシスタントです。検索結果に書かれている内容だけを根拠にしてください。一般知識、推測、外部知識、参考文献の補完は禁止です。検索結果に根拠がない場合は「選択された資料内では確認できません」とだけ明確に伝えてください。回答は現場スタッフ向けに簡潔な日本語にしてください。\n\n検索結果:\n$search_results$\n\n質問:\n$query$"
               }
             }
           }

@@ -13,7 +13,7 @@ export default function LoginPage({
     <div className="mx-auto flex min-h-[calc(100vh-3rem)] max-w-5xl items-center px-4 py-8">
       <div className="grid w-full gap-0 overflow-hidden rounded-md border border-[var(--line)] bg-white shadow-[0_18px_60px_rgba(17,24,39,0.08)] md:grid-cols-[1.15fr_0.85fr]">
         <section className="bg-[linear-gradient(135deg,#0f766e_0%,#115e59_48%,#0f3b39_100%)] px-7 py-8 text-white md:px-10 md:py-12">
-          <p className="mb-3 text-sm font-semibold tracking-wide text-white/75">Dental Manual Assistant</p>
+          <p className="mb-3 text-sm font-semibold tracking-wide text-white/75">Clinic Knowledge Repository</p>
           <h1 className="text-2xl font-semibold leading-tight md:text-3xl">院内ナレッジAI</h1>
           <p className="mt-4 max-w-xl text-sm leading-6 text-white/85">
             マニュアル、院内ルール、新人教育資料をまとめて扱う共有画面です。入室には共有パスワードが必要です。

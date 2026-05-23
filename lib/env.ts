@@ -4,7 +4,7 @@ export const appEnv = {
   textractRegion: process.env.APP_TEXTRACT_REGION || process.env.TEXTRACT_REGION || "ap-northeast-2",
   textractBucketName: process.env.APP_TEXTRACT_BUCKET_NAME || process.env.TEXTRACT_BUCKET_NAME || "",
   s3BucketName: process.env.S3_BUCKET_NAME || "",
-  s3ManualPrefix: process.env.S3_MANUAL_PREFIX || "manuals/",
+  s3FilePrefix: process.env.S3_FILE_PREFIX || process.env.S3_MANUAL_PREFIX || "manuals/",
   s3MetadataPrefix: process.env.S3_METADATA_PREFIX || "metadata/",
   prepareStateMachineArn: process.env.APP_PREPARE_STATE_MACHINE_ARN || process.env.PREPARE_STATE_MACHINE_ARN || "",
   summaryStateMachineArn: process.env.APP_SUMMARY_STATE_MACHINE_ARN || process.env.SUMMARY_STATE_MACHINE_ARN || "",

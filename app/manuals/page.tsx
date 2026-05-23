@@ -1,11 +1,5 @@
-import { PageHeading } from "@/components/page-heading";
-import { ManualsManager } from "@/components/manuals-manager";
+import { redirect } from "next/navigation";
 
-export default function ManualsPage() {
-  return (
-    <>
-      <PageHeading title="資料管理" />
-      <ManualsManager />
-    </>
-  );
+export default function LegacyRepositoryPage() {
+  redirect("/repository");
 }

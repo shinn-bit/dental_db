@@ -1,9 +1,9 @@
-import { GetObjectCommand } from "@aws-sdk/client-s3";
+﻿import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextResponse } from "next/server";
 import { createS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
-import { createMetadataS3Key, type ManualMetadata } from "@/lib/manuals";
+import { createMetadataS3Key, normalizeFileMetadata, type FileMetadataInput } from "@/lib/file-assets";
 import { parseS3Json } from "@/lib/s3-json";
 
 async function bodyToString(body: unknown) {
@@ -23,7 +23,7 @@ async function getMetadata(id: string) {
     })
   );
   const text = await bodyToString(response.Body);
-  return parseS3Json<ManualMetadata>(text);
+  return normalizeFileMetadata(parseS3Json<FileMetadataInput>(text));
 }
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -42,3 +42,4 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     fileName: file.fileName
   });
 }
+

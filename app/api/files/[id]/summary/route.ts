@@ -1,4 +1,4 @@
-import { PutObjectCommand } from "@aws-sdk/client-s3";
+﻿import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { NextResponse } from "next/server";
 import { createS3Client, createStepFunctionsClient } from "@/lib/aws";
@@ -7,8 +7,10 @@ import {
   createKnowledgeBaseS3Key,
   createMetadataS3Key,
   createSummaryS3Key,
-  type ManualMetadata
-} from "@/lib/manuals";
+  normalizeFileMetadata,
+  type FileMetadataInput,
+  type StoredFileMetadata
+} from "@/lib/file-assets";
 import { getS3Text, parseS3Json, putS3Text } from "@/lib/s3-json";
 
 export const runtime = "nodejs";
@@ -16,10 +18,10 @@ export const runtime = "nodejs";
 async function getMetadata(id: string) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   const text = await getS3Text(bucket, createMetadataS3Key(appEnv.s3MetadataPrefix, id));
-  return parseS3Json<ManualMetadata>(text);
+  return normalizeFileMetadata(parseS3Json<FileMetadataInput>(text));
 }
 
-async function saveMetadata(metadata: ManualMetadata) {
+async function saveMetadata(metadata: StoredFileMetadata) {
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   await createS3Client().send(
     new PutObjectCommand({
@@ -73,7 +75,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
-  let metadata: ManualMetadata | null = null;
+  let metadata: StoredFileMetadata | null = null;
 
   try {
     metadata = await getMetadata(id);
@@ -87,7 +89,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ summary, file: { ...metadata, summary } });
     }
 
-    const nextMetadata: ManualMetadata = {
+    const nextMetadata: StoredFileMetadata = {
       ...metadata,
       summaryStatus: "processing",
       summaryError: "",
@@ -114,7 +116,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: message }, { status: 500 });
     }
 
-    const nextMetadata: ManualMetadata = {
+    const nextMetadata: StoredFileMetadata = {
       ...metadata,
       summaryStatus: "failed",
       summaryError: message,
@@ -149,7 +151,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const metadata = await getMetadata(id);
   const summaryKey = metadata.summaryKey || createSummaryS3Key(id);
   const knowledgeBaseKey = metadata.knowledgeBaseKey || createKnowledgeBaseS3Key(id);
-  const nextMetadata: ManualMetadata = {
+  const nextMetadata: StoredFileMetadata = {
     ...metadata,
     summary,
     summaryStatus: "completed",
@@ -165,3 +167,4 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
   return NextResponse.json({ summary, file: nextMetadata });
 }
+

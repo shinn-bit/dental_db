@@ -307,12 +307,8 @@ def create_knowledge_base_document_from_text(metadata, text):
     header = [
         f"# {metadata.get('fileName') or '院内資料'}",
         "",
-        f"- 種類: {', '.join(metadata.get('categories') or []) or '未設定'}",
-        f"- 診療領域: {', '.join(metadata.get('clinicalAreas') or []) or '未設定'}",
-        f"- 読む人: {', '.join(metadata.get('roles') or []) or '未設定'}",
+        f"- タグ: {', '.join(metadata.get('tags') or []) or '未設定'}",
     ]
-    if metadata.get("tags"):
-        header.append(f"- タグ: {', '.join(metadata.get('tags') or [])}")
     if metadata.get("version"):
         header.append(f"- 版: {metadata.get('version')}")
     if metadata.get("memo"):
@@ -360,7 +356,7 @@ def start_kb_sync(event):
         response = bedrock_agent.start_ingestion_job(
             knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
             dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
-            description=f"Prepare manual {file_id}",
+            description=f"Prepare repository file {file_id}",
         )
     except Exception as error:
         return fail_preparation(metadata, f"Bedrock KB同期ジョブを開始できませんでした: {error}")

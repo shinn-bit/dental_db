@@ -1,4 +1,4 @@
-import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
+﻿import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import { StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-error";
@@ -6,10 +6,11 @@ import { createS3Client, createStepFunctionsClient } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import {
   createMetadataS3Key,
-  formatFileSize,
-  getThumbnailLabel,
-  type ManualMetadata
-} from "@/lib/manuals";
+  normalizeFileMetadata,
+  supportsAutomatedTextPreparation,
+  type FileMetadataInput,
+  type StoredFileMetadata
+} from "@/lib/file-assets";
 import { parseS3Json } from "@/lib/s3-json";
 
 async function bodyToString(body: unknown) {
@@ -59,7 +60,7 @@ export async function GET() {
             })
           );
           const text = await bodyToString(response.Body);
-          return parseS3Json<ManualMetadata>(text);
+          return normalizeFileMetadata(parseS3Json<FileMetadataInput>(text));
         })
     );
 
@@ -74,46 +75,15 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
-    const body = (await request.json()) as Partial<ManualMetadata>;
+    const body = (await request.json()) as FileMetadataInput;
 
     if (!body.id || !body.fileName || !body.s3Key) {
       return NextResponse.json({ error: "id, fileName and s3Key are required" }, { status: 400 });
     }
 
-    const metadata: ManualMetadata = {
-      id: body.id,
-      fileName: body.fileName,
-      s3Key: body.s3Key,
-      contentType: body.contentType || "application/octet-stream",
-      size: body.size || 0,
-      sizeLabel: body.sizeLabel || formatFileSize(body.size || 0),
-      thumbnailLabel: body.thumbnailLabel || getThumbnailLabel(body.fileName),
-      categoryIds: body.categoryIds || [],
-      categories: body.categories || [],
-      clinicalAreaIds: body.clinicalAreaIds || [],
-      clinicalAreas: body.clinicalAreas || [],
-      roleIds: body.roleIds || [],
-      roles: body.roles || [],
-      tags: body.tags || [],
-      version: body.version || "",
-      memo: body.memo || "",
-      summary: body.summary || "",
-      summaryStatus: body.summaryStatus || "not_started",
-      summaryError: body.summaryError || "",
-      summaryKey: body.summaryKey || "",
-      summaryUpdatedAt: body.summaryUpdatedAt || "",
-      preparationStatus: body.preparationStatus || "processing",
-      preparationError: body.preparationError || "",
-      ragSyncStatus: body.ragSyncStatus || "not_started",
-      ragSyncJobId: body.ragSyncJobId || "",
-      ragSyncedAt: body.ragSyncedAt || "",
-      textExtractionStatus: body.textExtractionStatus || "not_started",
-      textExtractionSource: body.textExtractionSource,
-      extractedTextKey: body.extractedTextKey || "",
-      extractedTextLength: body.extractedTextLength || 0,
-      textractJobId: body.textractJobId || "",
-      uploadedAt: body.uploadedAt || new Date().toISOString()
-    };
+    const metadata: StoredFileMetadata = normalizeFileMetadata(body);
+    const shouldPrepare = supportsAutomatedTextPreparation(metadata);
+    metadata.preparationStatus = body.preparationStatus || (shouldPrepare ? "processing" : "not_started");
 
     await createS3Client().send(
       new PutObjectCommand({
@@ -124,10 +94,13 @@ export async function POST(request: Request) {
       })
     );
 
-    await startPrepareWorkflow(metadata.id);
+    if (shouldPrepare) {
+      await startPrepareWorkflow(metadata.id);
+    }
 
     return NextResponse.json({ file: metadata });
   } catch (error) {
     return apiErrorResponse(error, "S3メタデータを保存できませんでした");
   }
 }
+

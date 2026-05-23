@@ -1,11 +1,11 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Check, Clipboard, ClipboardCheck, Plus, Search, Send, X } from "lucide-react";
 import { Button } from "@/components/ui";
-import { type ManualMetadata } from "@/lib/manuals";
+import { type StoredFileMetadata } from "@/lib/file-assets";
 
 type ChatMessage = {
   role: "user" | "assistant";
@@ -34,43 +34,43 @@ export function ChatPanel() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
-  const [manuals, setManuals] = useState<ManualMetadata[]>([]);
-  const [selectedManualIds, setSelectedManualIds] = useState<string[]>([]);
-  const [manualPickerOpen, setManualPickerOpen] = useState(false);
-  const [manualQuery, setManualQuery] = useState("");
+  const [repositoryFiles, setRepositoryFiles] = useState<StoredFileMetadata[]>([]);
+  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
+  const [filePickerOpen, setFilePickerOpen] = useState(false);
+  const [fileQuery, setFileQuery] = useState("");
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
-  const manualPickerRef = useRef<HTMLDivElement | null>(null);
+  const filePickerRef = useRef<HTMLDivElement | null>(null);
 
-  const selectedManuals = useMemo(
-    () => manuals.filter((manual) => selectedManualIds.includes(manual.id)),
-    [manuals, selectedManualIds]
+  const selectedRepositoryFiles = useMemo(
+    () => repositoryFiles.filter((file) => selectedFileIds.includes(file.id)),
+    [repositoryFiles, selectedFileIds]
   );
-  const filteredManuals = useMemo(
-    () => manuals.filter((manual) => manual.fileName.toLowerCase().includes(manualQuery.toLowerCase())),
-    [manualQuery, manuals]
+  const filteredRepositoryFiles = useMemo(
+    () => repositoryFiles.filter((file) => file.fileName.toLowerCase().includes(fileQuery.toLowerCase())),
+    [fileQuery, repositoryFiles]
   );
 
   useEffect(() => {
     let ignore = false;
 
-    async function loadManuals() {
+    async function loadRepositoryFiles() {
       try {
         const response = await fetch("/api/files", { cache: "no-store" });
         if (!response.ok) {
-          throw new Error("Failed to load manuals");
+          throw new Error("Failed to load files");
         }
-        const data = (await response.json()) as { files: ManualMetadata[] };
+        const data = (await response.json()) as { files: StoredFileMetadata[] };
         if (!ignore) {
-          setManuals(data.files);
+          setRepositoryFiles(data.files);
         }
       } catch {
         if (!ignore) {
-          setNotice("マニュアル一覧を読み込めませんでした。");
+          setNotice("資料庫の一覧を読み込めませんでした。");
         }
       }
     }
 
-    loadManuals();
+    loadRepositoryFiles();
 
     return () => {
       ignore = true;
@@ -79,21 +79,21 @@ export function ChatPanel() {
 
   useEffect(() => {
     function handlePointerDown(event: PointerEvent) {
-      if (manualPickerRef.current && !manualPickerRef.current.contains(event.target as Node)) {
-        setManualPickerOpen(false);
+      if (filePickerRef.current && !filePickerRef.current.contains(event.target as Node)) {
+        setFilePickerOpen(false);
       }
     }
 
-    if (manualPickerOpen) {
+    if (filePickerOpen) {
       document.addEventListener("pointerdown", handlePointerDown);
     }
 
     return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [manualPickerOpen]);
+  }, [filePickerOpen]);
 
-  function toggleManual(id: string) {
-    setSelectedManualIds((current) =>
-      current.includes(id) ? current.filter((manualId) => manualId !== id) : [...current, id]
+  function toggleFile(id: string) {
+    setSelectedFileIds((current) =>
+      current.includes(id) ? current.filter((fileId) => fileId !== id) : [...current, id]
     );
   }
 
@@ -124,10 +124,13 @@ export function ChatPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          manuals: selectedManuals.map((manual) => ({
-            id: manual.id,
-            fileName: manual.fileName,
-            s3Key: manual.s3Key
+          files: selectedRepositoryFiles.map((file) => ({
+            id: file.id,
+            fileName: file.fileName,
+            s3Key: file.s3Key,
+            summaryKey: file.summaryKey,
+            knowledgeBaseKey: file.knowledgeBaseKey,
+            extractedTextKey: file.extractedTextKey
           }))
         })
       });
@@ -141,7 +144,7 @@ export function ChatPanel() {
           role: "assistant",
           text:
             data.answer?.trim() ||
-            "院内マニュアルから該当する内容を見つけられませんでした。資料の同期状態を確認してください。"
+            "資料庫から該当する内容を見つけられませんでした。資料の同期状態を確認してください。"
         }
       ]);
     } catch (error) {
@@ -192,15 +195,15 @@ export function ChatPanel() {
       </div>
 
       <div style={{ borderTop: "1px solid var(--line)", padding: 18, background: "var(--panel-deep)", borderBottomLeftRadius: 16, borderBottomRightRadius: 16 }}>
-        {selectedManuals.length > 0 ? (
+        {selectedRepositoryFiles.length > 0 ? (
           <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             <span className="tiny soft" style={{ letterSpacing: "0.14em" }}>参照：</span>
-            {selectedManuals.map((manual) => (
-              <span key={manual.id} className="tag">
-                <span className="truncate" style={{ maxWidth: 180 }}>{manual.fileName.replace(/\.[^.]+$/, "")}</span>
+            {selectedRepositoryFiles.map((file) => (
+              <span key={file.id} className="tag">
+                <span className="truncate" style={{ maxWidth: 180 }}>{file.fileName.replace(/\.[^.]+$/, "")}</span>
                 <button
                   type="button"
-                  onClick={() => toggleManual(manual.id)}
+                  onClick={() => toggleFile(file.id)}
                   style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0, marginLeft: 2, display: "inline-flex" }}
                   title="この資料を外す"
                 >
@@ -212,50 +215,50 @@ export function ChatPanel() {
         ) : null}
 
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "stretch" }}>
-          <div style={{ position: "relative" }} ref={manualPickerRef}>
+          <div style={{ position: "relative" }} ref={filePickerRef}>
             <Button
               variant="secondary"
-              onClick={() => setManualPickerOpen((current) => !current)}
+              onClick={() => setFilePickerOpen((current) => !current)}
               title="参照する資料を選ぶ"
               style={{ height: "100%", paddingLeft: 14, paddingRight: 14, flexDirection: "column", gap: 2 }}
             >
               <Plus size={16} aria-hidden="true" />
               <span style={{ fontSize: 10, letterSpacing: "0.12em", fontWeight: 500 }}>資料を選ぶ</span>
             </Button>
-            {manualPickerOpen ? (
+            {filePickerOpen ? (
               <div style={{ position: "absolute", bottom: "calc(100% + 8px)", left: 0, width: 360, maxWidth: "calc(100vw - 32px)", background: "#fff", border: "1px solid var(--line)", borderRadius: 12, boxShadow: "var(--shadow-lg)", padding: 14, zIndex: 20 }}>
                 <div className="between" style={{ marginBottom: 10 }}>
                   <span className="panel-title" style={{ fontSize: 13 }}>参照する資料</span>
-                  <button type="button" onClick={() => setManualPickerOpen(false)} className="btn ghost sm icon" title="閉じる">
+                  <button type="button" onClick={() => setFilePickerOpen(false)} className="btn ghost sm icon" title="閉じる">
                     <X size={14} aria-hidden="true" />
                   </button>
                 </div>
                 <div style={{ position: "relative", marginBottom: 10 }}>
                   <Search size={14} style={{ position: "absolute", left: 12, top: 12, color: "var(--ink-muted)" }} aria-hidden="true" />
-                  <input className="input" placeholder="ファイル名で探す" style={{ paddingLeft: 34, height: 36 }} value={manualQuery} onChange={(event) => setManualQuery(event.target.value)} />
+                  <input className="input" placeholder="ファイル名で探す" style={{ paddingLeft: 34, height: 36 }} value={fileQuery} onChange={(event) => setFileQuery(event.target.value)} />
                 </div>
                 <div className="between" style={{ marginBottom: 8 }}>
                   <span className="tiny soft">未選択の場合は院内すべての資料から探します</span>
-                  {selectedManualIds.length > 0 ? (
-                    <button type="button" onClick={() => setSelectedManualIds([])} className="btn ghost sm">すべて外す</button>
+                  {selectedFileIds.length > 0 ? (
+                    <button type="button" onClick={() => setSelectedFileIds([])} className="btn ghost sm">すべて外す</button>
                   ) : null}
                 </div>
                 <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                  {filteredManuals.map((manual) => {
-                    const selected = selectedManualIds.includes(manual.id);
+                  {filteredRepositoryFiles.map((file) => {
+                    const selected = selectedFileIds.includes(file.id);
                     return (
                       <button
-                        key={manual.id}
+                        key={file.id}
                         type="button"
-                        onClick={() => toggleManual(manual.id)}
+                        onClick={() => toggleFile(file.id)}
                         style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: selected ? "var(--navy-tint-soft)" : "transparent", border: `1px solid ${selected ? "var(--navy-tint)" : "transparent"}`, borderRadius: 8, textAlign: "left", cursor: "pointer" }}
                       >
                         <span style={{ width: 18, height: 18, borderRadius: 4, border: `1.5px solid ${selected ? "var(--navy)" : "#c8c4b5"}`, background: selected ? "var(--navy)" : "transparent", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
                           {selected ? <Check size={12} aria-hidden="true" /> : null}
                         </span>
                         <span className="stack" style={{ minWidth: 0, flex: 1 }}>
-                          <span className="truncate" style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{manual.fileName.replace(/\.[^.]+$/, "")}</span>
-                          <span className="tiny soft truncate">{manual.categories.join("・")} ／ {manual.roles.join("・")}</span>
+                          <span className="truncate" style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>{file.fileName.replace(/\.[^.]+$/, "")}</span>
+                          <span className="tiny soft truncate">{file.sizeLabel || file.thumbnailLabel || "資料"}</span>
                         </span>
                       </button>
                     );
@@ -327,3 +330,5 @@ function AssistantMessage({ text, copied, onCopy }: { text: string; copied: bool
     </div>
   );
 }
+
+

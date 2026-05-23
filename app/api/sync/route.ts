@@ -26,7 +26,7 @@ export async function POST() {
     new StartIngestionJobCommand({
       knowledgeBaseId,
       dataSourceId,
-      description: "Manual upload sync"
+      description: "Repository file sync"
     })
   );
 
