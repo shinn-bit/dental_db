@@ -40,7 +40,7 @@ function createKnowledgeBaseDocument(summary: string) {
     .replace(/[ \t]+/g, " ")
     .trim();
 
-  return normalized.slice(0, 1800);
+  return normalized.slice(0, 12000);
 }
 
 function createExecutionName(fileId: string) {
@@ -158,7 +158,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     summaryError: "",
     summaryKey,
     knowledgeBaseKey,
-    summaryUpdatedAt: new Date().toISOString()
+    summaryUpdatedAt: new Date().toISOString(),
+    summaryMode: "manual"
   };
 
   await putS3Text(bucket, summaryKey, summary, "text/markdown; charset=utf-8");

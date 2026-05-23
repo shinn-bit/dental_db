@@ -9,24 +9,22 @@ from botocore.exceptions import ClientError
 
 
 SUMMARY_TEMPLATE = """
-以下のPDF本文を、歯科医院の院内教育・診療補助に使えるようにMarkdownで要約してください。
-必ず次の9項目をこの順番で見出しとして出力してください。本文に根拠がない項目は「資料内では確認できません」と書いてください。
+以下のPDF本文を、歯科医院の院内教育・診療補助に使えるように、目次・章・節ごとのMarkdown要約にしてください。
 
-## 1. 病気の解説
-## 2. 原因
-## 3. 病態、所見
-## 4. 患者の訴えること、症状
-## 5. 当日の処置（応急処置）
-## 6. 治療法
-## 7. 治療の具体的なステップ
-## 8. 予防、術後のメンテナンス
-## 9. その他注意すべきこと
+出力形式:
+- 資料名が読み取れる場合は最初に `# 資料名` を置く
+- 以降は本文内の目次、章、節、見出し、番号付き項目に沿って `## 見出し名` で区切る
+- 各見出しの本文は400字以内
+- 各見出しの本文は2〜5個程度の箇条書きを基本にする
+- 章や節の見出しが不明な場合は、内容のまとまりから自然な見出しを付ける
+- ページ番号や「第○章」「1-1」などが読み取れる場合は見出しに残す
 
-条件:
-- 日本語で出力
-- 現場スタッフが読んで使える具体性にする
-- 資料にない内容を推測で補わない
-- 箇条書きを適度に使う
+内容ルール:
+- 資料に書かれている内容だけを書く
+- 推測、一般知識、外部知識で補わない
+- 手順、判断基準、禁忌、注意点、器材名、数値、患者説明に使える表現を優先する
+- 画像・図表由来と思われる箇所で本文根拠が不足する場合は「資料内では確認できません」と書く
+- 文字化けやOCR不良で読めない章は「OCR結果からは判読困難です」と書く
 """
 
 MIN_EXTRACTED_TEXT_LENGTH = 100
@@ -34,53 +32,43 @@ SUMMARY_CHUNK_SIZE = 25000
 SUMMARY_CHUNK_OVERLAP = 1500
 
 CHUNK_MATERIAL_TEMPLATE = """
-以下は歯科資料本文の一部です。最終的には院内教育・診療補助用の9項目要約に統合します。
-この段階では9項目の完成形に無理に当てはめず、最終要約に使える材料をMarkdownで抽出してください。
+以下は歯科資料本文の一部です。最終的には資料全体の「目次・章・節ごとの400字以内要約」に統合します。
+この段階では、対象範囲に含まれる章・節・見出し候補と、その要約材料をMarkdownで抽出してください。
 
 出力ルール:
 - 日本語で出力
 - 資料に書かれている内容だけを書く
 - 推測で補わない
-- 重複はできるだけ避ける
-- この範囲にない内容は「この範囲では確認できません」と書く
+- この範囲にない内容は書かない
+- 章・節・見出しが読み取れる場合は必ず残す
+- 見出しが不明な場合は、内容のまとまりから仮見出しを付ける
+- 各見出しの要約材料は400字以内
 - 数値、手順、分類、注意点、器材名、診断基準など具体情報を優先する
 
-見出しは次の順番にしてください。
-
-## この範囲の主題
-## 重要概念・定義
-## 疾患・病態に関する情報
-## 原因・リスク因子
-## 症状・所見・診断
-## 当日の対応・処置
-## 治療法・具体的手順
-## 予防・メンテナンス
-## 注意点・禁忌・失敗しやすい点
-## 最終9項目要約に残すべき具体情報
+出力形式:
+## 見出し候補
+- 要約材料...
 """
 
 FINAL_SUMMARY_FROM_MATERIALS_TEMPLATE = """
-以下はPDF全文を分割して抽出した材料メモです。
-これらを統合し、歯科医院の院内教育・診療補助に使えるMarkdown要約を作成してください。
+以下はPDF全文を分割して抽出した、章・節・見出しごとの材料メモです。
+これらを統合し、資料全体の目次・章・節に沿ったMarkdown要約を作成してください。
 
-必ず次の9項目をこの順番で見出しとして出力してください。材料メモに根拠がない項目は「資料内では確認できません」と書いてください。
-
-## 1. 病気の解説
-## 2. 原因
-## 3. 病態、所見
-## 4. 患者の訴えること、症状
-## 5. 当日の処置（応急処置）
-## 6. 治療法
-## 7. 治療の具体的なステップ
-## 8. 予防、術後のメンテナンス
-## 9. その他注意すべきこと
+出力形式:
+- 資料名が読み取れる場合は最初に `# 資料名` を置く
+- 以降は `## 見出し名` で区切る
+- 各見出しの本文は400字以内
+- 各見出しの本文は2〜5個程度の箇条書きを基本にする
+- 同じ章・節の重複は統合する
+- チャンク境界で分断された同一章は1つにまとめる
+- 目次らしい順番が読み取れる場合は、その順番を優先する
+- 順番が不明な場合は資料内に出てきた順に並べる
 
 条件:
 - 日本語で出力
 - 現場スタッフが読んで使える具体性にする
 - 資料にない内容を推測で補わない
-- 重複する内容は統合する
-- 箇条書きや表を適度に使う
+- OCR不良で判読できない範囲は「OCR結果からは判読困難です」と明記する
 """
 
 
@@ -299,7 +287,7 @@ def create_knowledge_base_document(summary):
     normalized = "\n".join(line.rstrip() for line in summary.replace("\r\n", "\n").split("\n"))
     while "\n\n\n" in normalized:
         normalized = normalized.replace("\n\n\n", "\n\n")
-    return normalized.strip()[:1800]
+    return normalized.strip()[:12000]
 
 
 def create_knowledge_base_document_from_text(metadata, text):
@@ -441,7 +429,7 @@ def invoke_bedrock(prompt, max_tokens=4096):
 
 def invoke_bedrock_summary(text):
     prompt = f"{SUMMARY_TEMPLATE}\n\nPDF本文:\n{text[:180000]}"
-    return invoke_bedrock(prompt, max_tokens=4096)
+    return invoke_bedrock(prompt, max_tokens=8192)
 
 
 def split_text_for_summary(text):
@@ -479,7 +467,7 @@ def summarize_chunk(chunk, index, total):
         f"対象範囲: チャンク {index + 1}/{total}\n\n"
         f"PDF本文の一部:\n{chunk}"
     )
-    return invoke_bedrock(prompt, max_tokens=2200)
+    return invoke_bedrock(prompt, max_tokens=3000)
 
 
 def generate_summary_from_materials(materials):
@@ -487,7 +475,7 @@ def generate_summary_from_materials(materials):
         f"# 分割材料 {index + 1}\n{material}" for index, material in enumerate(materials)
     )
     prompt = f"{FINAL_SUMMARY_FROM_MATERIALS_TEMPLATE}\n\n分割材料メモ:\n{joined_materials}"
-    return invoke_bedrock(prompt, max_tokens=4096)
+    return invoke_bedrock(prompt, max_tokens=8192)
 
 
 def generate_chunked_summary(bucket, file_id, extracted_text):
@@ -505,6 +493,7 @@ def generate_chunked_summary(bucket, file_id, extracted_text):
         json.dumps(
             {
                 "fileId": file_id,
+                "summaryMode": "section",
                 "chunkSize": SUMMARY_CHUNK_SIZE,
                 "chunkOverlap": SUMMARY_CHUNK_OVERLAP,
                 "chunks": materials,
@@ -554,6 +543,7 @@ def generate_summary(event):
             "summaryKey": summary_s3_key,
             "knowledgeBaseKey": kb_s3_key,
             "summaryUpdatedAt": now,
+            "summaryMode": "section",
             "summaryChunkCount": len(materials) if materials else 1,
             "summaryChunkMaterialsKey": chunk_materials_key(file_id) if materials else "",
         }

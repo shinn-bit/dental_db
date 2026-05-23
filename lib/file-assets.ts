@@ -17,6 +17,9 @@ export type StoredFileMetadata = {
   summaryKey?: string;
   knowledgeBaseKey?: string;
   summaryUpdatedAt?: string;
+  summaryMode?: "section" | "manual" | "legacy";
+  summaryChunkCount?: number;
+  summaryChunkMaterialsKey?: string;
   preparationStatus?: "not_started" | "processing" | "syncing" | "completed" | "failed";
   preparationError?: string;
   ragSyncStatus?: "not_started" | "syncing" | "completed" | "failed";
@@ -103,6 +106,9 @@ export function normalizeFileMetadata(input: FileMetadataInput): StoredFileMetad
     summaryKey: input.summaryKey || "",
     knowledgeBaseKey: input.knowledgeBaseKey || "",
     summaryUpdatedAt: input.summaryUpdatedAt || "",
+    summaryMode: input.summaryMode || "legacy",
+    summaryChunkCount: input.summaryChunkCount || 0,
+    summaryChunkMaterialsKey: input.summaryChunkMaterialsKey || "",
     preparationStatus: input.preparationStatus || "not_started",
     preparationError: input.preparationError || "",
     ragSyncStatus: input.ragSyncStatus || "not_started",
