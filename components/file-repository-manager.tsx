@@ -424,6 +424,7 @@ export function FileRepositoryManager() {
   const searching = libQuery.trim().length > 0;
   const searchHits = searching ? files.filter((f) => f.name.toLowerCase().includes(libQuery.toLowerCase())) : [];
   const filesInSub = sub && cat ? files.filter((f) => assignments[f.id]?.catId === cat.id && assignments[f.id]?.subId === sub.id) : [];
+  const unassignedFiles = files.filter((f) => !assignments[f.id]);
 
   const currentCat = library.find((c) => c.id === destCat);
 
@@ -594,6 +595,13 @@ export function FileRepositoryManager() {
                   onDelete={deleteCategory}
                   filesInCategory={filesInCategory}
                   drag={dragCtx}
+                  unassignedFiles={unassignedFiles}
+                  onOpenSummary={openOrCreateSummary}
+                  onDetail={openDetail}
+                  onDeleteFile={deleteFile}
+                  summaryProcessingId={summaryProcessingId}
+                  blockedSummaryId={blockedSummaryId}
+                  deletingId={deletingId}
                 />
               ) : !sub ? (
                 <SubcategoryView
@@ -770,7 +778,7 @@ function TreeNode({ label, count, active, onClick, chevron, onChevron, indent = 
 }
 
 // ── Category grid (root) ────────────────────────────────────────
-function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag }: {
+function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag, unassignedFiles, onOpenSummary, onDetail, onDeleteFile, summaryProcessingId, blockedSummaryId, deletingId }: {
   library: LibraryCategory[];
   onPick: (c: LibraryCategory) => void;
   onAdd: (label: string) => void;
@@ -778,13 +786,42 @@ function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCateg
   onDelete: (id: string) => void;
   filesInCategory: (catId: string) => number;
   drag: DragCtx;
+  unassignedFiles: RepositoryFile[];
+  onOpenSummary: (f: RepositoryFile) => void;
+  onDetail: (f: RepositoryFile) => void;
+  onDeleteFile: (f: RepositoryFile) => void;
+  summaryProcessingId: string | null;
+  blockedSummaryId: string | null;
+  deletingId: string | null;
 }) {
   return (
-    <div style={{ padding: 20, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
-      {library.map((c) => (
-        <CategoryCard key={c.id} cat={c} fileCount={filesInCategory(c.id)} onClick={() => onPick(c)} onRename={(v) => onRename(c.id, v)} onDelete={() => onDelete(c.id)} drag={drag} />
-      ))}
-      <AddCategoryCard onAdd={onAdd} />
+    <div style={{ padding: 20 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
+        {library.map((c) => (
+          <CategoryCard key={c.id} cat={c} fileCount={filesInCategory(c.id)} onClick={() => onPick(c)} onRename={(v) => onRename(c.id, v)} onDelete={() => onDelete(c.id)} drag={drag} />
+        ))}
+        <AddCategoryCard onAdd={onAdd} />
+      </div>
+      {unassignedFiles.length > 0 ? (
+        <div style={{ marginTop: 28 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+            <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+            <span className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.12em", fontWeight: 600, whiteSpace: "nowrap" }}>
+              未整理 ({unassignedFiles.length} 件) — フォルダーにドラッグして整理
+            </span>
+            <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+            {unassignedFiles.map((f) => (
+              <DraggableFileCard
+                key={f.id} file={f} drag={drag}
+                onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDeleteFile}
+                summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
