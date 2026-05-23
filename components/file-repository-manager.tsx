@@ -215,6 +215,18 @@ export function FileRepositoryManager() {
     return () => window.clearInterval(timer);
   }, [files]);
 
+  // Auto-assign unassigned files to 一般診療
+  useEffect(() => {
+    if (isLoadingFiles || files.length === 0) return;
+    const unassigned = files.filter((f) => !assignments[f.id]);
+    if (unassigned.length === 0) return;
+    setAssignments((prev) => {
+      const next = { ...prev };
+      unassigned.forEach((f) => { next[f.id] = { catId: "cat-general", subId: null }; });
+      return next;
+    });
+  }, [isLoadingFiles, files]);
+
   function addPendingFiles(nextFiles: FileList | File[]) {
     const incoming = Array.from(nextFiles).filter((f) => f.size > 0);
     if (!incoming.length) return;
@@ -423,7 +435,6 @@ export function FileRepositoryManager() {
   const searching = libQuery.trim().length > 0;
   const searchHits = searching ? files.filter((f) => f.name.toLowerCase().includes(libQuery.toLowerCase())) : [];
   const filesInSub = sub && cat ? files.filter((f) => assignments[f.id]?.catId === cat.id && assignments[f.id]?.subId === sub.id) : [];
-  const unassignedFiles = files.filter((f) => !assignments[f.id]);
 
   const currentCat = library.find((c) => c.id === destCat);
 
@@ -593,7 +604,6 @@ export function FileRepositoryManager() {
                   onRename={renameCategory}
                   onDelete={deleteCategory}
                   filesInCategory={filesInCategory}
-                  unassignedCount={unassignedFiles.length}
                   drag={dragCtx}
                 />
               ) : !sub ? (
@@ -771,14 +781,13 @@ function TreeNode({ label, count, active, onClick, chevron, onChevron, indent = 
 }
 
 // ── Category grid (root) ────────────────────────────────────────
-function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, unassignedCount, drag }: {
+function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag }: {
   library: LibraryCategory[];
   onPick: (c: LibraryCategory) => void;
   onAdd: (label: string) => void;
   onRename: (id: string, label: string) => void;
   onDelete: (id: string) => void;
   filesInCategory: (catId: string) => number;
-  unassignedCount: number;
   drag: DragCtx;
 }) {
   return (
@@ -787,11 +796,6 @@ function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCateg
         <CategoryCard key={c.id} cat={c} fileCount={filesInCategory(c.id)} onClick={() => onPick(c)} onRename={(v) => onRename(c.id, v)} onDelete={() => onDelete(c.id)} drag={drag} />
       ))}
       <AddCategoryCard onAdd={onAdd} />
-      {unassignedCount > 0 ? (
-        <div style={{ gridColumn: "1 / -1", padding: "10px 14px", background: "var(--warn-tint)", border: "1px solid #d4bb8a", borderRadius: 8, fontSize: 12, color: "var(--warn)" }}>
-          フォルダー未割り当ての資料が {unassignedCount} 件あります。資料をフォルダーへドラッグして整理できます。
-        </div>
-      ) : null}
     </div>
   );
 }
