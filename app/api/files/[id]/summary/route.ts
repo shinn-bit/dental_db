@@ -84,7 +84,7 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ summary: metadata.summary || "", file: metadata }, { status: 202 });
     }
 
-    if (metadata.summaryKey && metadata.summaryMode === "section") {
+    if (metadata.summaryKey) {
       const summary = await getS3Text(bucket, metadata.summaryKey);
       return NextResponse.json({ summary, file: { ...metadata, summary } });
     }
