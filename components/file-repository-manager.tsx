@@ -215,17 +215,6 @@ export function FileRepositoryManager() {
     return () => window.clearInterval(timer);
   }, [files]);
 
-  // Auto-assign unassigned files to 一般診療
-  useEffect(() => {
-    if (isLoadingFiles || files.length === 0) return;
-    const unassigned = files.filter((f) => !assignments[f.id]);
-    if (unassigned.length === 0) return;
-    setAssignments((prev) => {
-      const next = { ...prev };
-      unassigned.forEach((f) => { next[f.id] = { catId: "cat-general", subId: null }; });
-      return next;
-    });
-  }, [isLoadingFiles, files]);
 
   function addPendingFiles(nextFiles: FileList | File[]) {
     const incoming = Array.from(nextFiles).filter((f) => f.size > 0);
