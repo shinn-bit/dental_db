@@ -19,6 +19,7 @@ type RepositoryFile = {
   memo: string;
   summary: string;
   summaryStatus: StoredFileMetadata["summaryStatus"];
+  summaryMode: StoredFileMetadata["summaryMode"];
   summaryUpdatedAt: string;
   preparationStatus: StoredFileMetadata["preparationStatus"];
   textExtractionStatus: StoredFileMetadata["textExtractionStatus"];
@@ -240,7 +241,7 @@ export function FileRepositoryManager() {
     setSummaryProcessingId(file.id);
     setNotice("");
     try {
-      const method = file.summaryStatus === "completed" ? "GET" : "POST";
+      const method = file.summaryStatus === "completed" && file.summaryMode === "section" ? "GET" : "POST";
       const response = await fetch(`/api/files/${file.id}/summary`, { method, cache: "no-store" });
       const data = (await response.json()) as { summary?: string; file?: StoredFileMetadata; error?: string };
       if (!response.ok) {
@@ -477,7 +478,7 @@ export function FileRepositoryManager() {
               {filteredFiles.map((file) => (
                 <FileCard
                   key={file.id}
-                  file={file}
+          file={file}
                   processing={summaryProcessingId === file.id}
                   blocked={blockedSummaryId === file.id}
                   deleting={deletingId === file.id}
@@ -529,6 +530,7 @@ function FileCard({ file, processing, blocked, deleting, onSummary, onDetail, on
   const needsOcr = file.textExtractionStatus === "ocr_required";
   const canCreateSummary = file.preparationStatus === "completed";
   const summaryInProgress = file.summaryStatus === "processing" || processing;
+  const hasSectionSummary = file.summaryStatus === "completed" && file.summaryMode === "section";
   const preparationLabel =
     file.preparationStatus === "completed"
       ? "AI参照可"
@@ -566,18 +568,18 @@ function FileCard({ file, processing, blocked, deleting, onSummary, onDetail, on
           <span className="row" style={{ gap: 4, color: preparationColor, background: "var(--warn-tint)", padding: "3px 8px", borderRadius: 4, fontWeight: 500 }}>{preparationLabel}</span>
         )}
         <span style={{ color: "var(--ink-faint)" }}>・</span>
-        <span>{file.summaryStatus === "completed" ? "要約あり" : "要約まだ"}</span>
+        <span>{hasSectionSummary ? "章別要約あり" : file.summaryStatus === "completed" ? "旧要約あり" : "要約まだ"}</span>
         {file.version ? <><span style={{ color: "var(--ink-faint)" }}>・</span><span>{file.version}</span></> : null}
       </div>
       <div className="row" style={{ gap: 6, borderTop: "1px solid var(--line-soft)", paddingTop: 12 }}>
         <Button
-          variant={file.summaryStatus === "completed" ? "secondary" : canCreateSummary ? "primary" : "secondary"}
+          variant={hasSectionSummary ? "secondary" : canCreateSummary ? "primary" : "secondary"}
           size="sm"
-          style={{ flex: 1, opacity: canCreateSummary || file.summaryStatus === "completed" ? 1 : 0.58 }}
+          style={{ flex: 1, opacity: canCreateSummary || hasSectionSummary ? 1 : 0.58 }}
           disabled={summaryInProgress}
           onClick={onSummary}
         >
-          {summaryInProgress ? "要約作成中" : file.summaryStatus === "completed" ? "要約を見る" : "要約をつくる"}
+          {summaryInProgress ? "要約作成中" : hasSectionSummary ? "要約を見る" : file.summaryStatus === "completed" ? "章別要約に更新" : "要約をつくる"}
         </Button>
         <Button variant="ghost" size="sm" onClick={onDetail}>
           <Edit size={13} aria-hidden="true" />
@@ -929,6 +931,7 @@ function metadataToRepositoryFile(metadata: StoredFileMetadata): RepositoryFile 
     memo: metadata.memo,
     summary: metadata.summary || "",
     summaryStatus: metadata.summaryStatus || "not_started",
+    summaryMode: metadata.summaryMode || "legacy",
     summaryUpdatedAt: metadata.summaryUpdatedAt || "",
     preparationStatus: metadata.preparationStatus || "not_started",
     textExtractionStatus: metadata.textExtractionStatus || "not_started"
