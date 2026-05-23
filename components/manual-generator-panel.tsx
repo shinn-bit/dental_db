@@ -7,27 +7,9 @@ import { Check, Download, FileText, Search, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
-type DetailLevel = "brief" | "standard" | "detailed";
-
-const AUDIENCE_OPTIONS = [
-  { value: "全スタッフ", label: "全スタッフ" },
-  { value: "歯科医師", label: "歯科医師" },
-  { value: "歯科衛生士", label: "歯科衛生士" },
-  { value: "歯科助手", label: "歯科助手" },
-  { value: "受付", label: "受付" }
-];
-
-const DETAIL_OPTIONS: { value: DetailLevel; label: string }[] = [
-  { value: "brief", label: "簡略（3〜5文）" },
-  { value: "standard", label: "標準（5〜8文）" },
-  { value: "detailed", label: "詳細（8〜12文）" }
-];
-
 export function ManualGeneratorPanel() {
   const [theme, setTheme] = useState("");
-  const [audience, setAudience] = useState("全スタッフ");
   const [purpose, setPurpose] = useState("");
-  const [detailLevel, setDetailLevel] = useState<DetailLevel>("standard");
 
   const [repositoryFiles, setRepositoryFiles] = useState<StoredFileMetadata[]>([]);
   const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
@@ -55,11 +37,11 @@ export function ManualGeneratorPanel() {
     async function load() {
       try {
         const res = await fetch("/api/files", { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to load");
+        if (!res.ok) return;
         const data = (await res.json()) as { files: StoredFileMetadata[] };
         if (!ignore) setRepositoryFiles(data.files);
       } catch {
-        // 資料一覧取得失敗は非致命的
+        // 非致命的
       }
     }
     load();
@@ -100,7 +82,7 @@ export function ManualGeneratorPanel() {
       const res = await fetch("/api/generate-manual", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ theme: theme.trim(), audience, purpose, detailLevel, files })
+        body: JSON.stringify({ theme: theme.trim(), purpose, files })
       });
       const data = (await res.json()) as { content?: string; docxBase64?: string; theme?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "生成に失敗しました");
@@ -108,8 +90,7 @@ export function ManualGeneratorPanel() {
       setDocxBase64(data.docxBase64 ?? "");
       setGeneratedTheme(data.theme ?? theme.trim());
     } catch (error) {
-      const msg = error instanceof Error ? error.message : "生成に失敗しました";
-      setNotice(msg);
+      setNotice(error instanceof Error ? error.message : "生成に失敗しました");
     } finally {
       setLoading(false);
     }
@@ -153,37 +134,6 @@ export function ManualGeneratorPanel() {
               onChange={(e) => setTheme(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") generate(); }}
             />
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", color: "var(--ink-soft)", marginBottom: 6 }}>
-                対象読者
-              </label>
-              <select
-                className="input"
-                value={audience}
-                onChange={(e) => setAudience(e.target.value)}
-              >
-                {AUDIENCE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label style={{ display: "block", fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", color: "var(--ink-soft)", marginBottom: 6 }}>
-                詳細度
-              </label>
-              <select
-                className="input"
-                value={detailLevel}
-                onChange={(e) => setDetailLevel(e.target.value as DetailLevel)}
-              >
-                {DETAIL_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
           </div>
 
           <div>
@@ -275,11 +225,7 @@ export function ManualGeneratorPanel() {
             ) : null}
           </div>
 
-          <Button
-            onClick={generate}
-            disabled={!theme.trim() || loading}
-            style={{ gap: 8 }}
-          >
+          <Button onClick={generate} disabled={!theme.trim() || loading} style={{ gap: 8 }}>
             <Sparkles size={16} aria-hidden="true" />
             {loading ? "生成中…" : "マニュアルを生成"}
           </Button>
@@ -305,10 +251,9 @@ export function ManualGeneratorPanel() {
               </Button>
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-              <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 4, marginTop: 0 }}>
+              <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>
                 {generatedTheme}
               </h1>
-              <p style={{ fontSize: 12, color: "var(--ink-muted)", marginBottom: 20, marginTop: 0 }}>対象読者: {audience}</p>
               <div className="prose">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
               </div>
