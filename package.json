@@ -21,6 +21,7 @@
     "@aws-sdk/credential-providers": "^3.1048.0",
     "@aws-sdk/s3-request-presigner": "^3.1048.0",
     "clsx": "latest",
+    "docx": "^9.6.1",
     "lucide-react": "latest",
     "next": "latest",
     "pdf-parse": "^2.4.5",
