@@ -22,6 +22,8 @@ SUMMARY_TEMPLATE = """
 内容ルール:
 - 資料に書かれている内容だけを書く
 - 推測、一般知識、外部知識で補わない
+- 「病気の解説」「原因」「病態」「治療法」などの固定9項目には分類しない
+- 本文に出てくる目次、章、節、見出しごとの要約だけを書く
 - 手順、判断基準、禁忌、注意点、器材名、数値、患者説明に使える表現を優先する
 - 画像・図表由来と思われる箇所で本文根拠が不足する場合は「資料内では確認できません」と書く
 - 文字化けやOCR不良で読めない章は「OCR結果からは判読困難です」と書く
@@ -39,6 +41,7 @@ CHUNK_MATERIAL_TEMPLATE = """
 - 日本語で出力
 - 資料に書かれている内容だけを書く
 - 推測で補わない
+- 「病気の解説」「原因」「病態」「治療法」などの固定9項目には分類しない
 - この範囲にない内容は書かない
 - 章・節・見出しが読み取れる場合は必ず残す
 - 見出しが不明な場合は、内容のまとまりから仮見出しを付ける
@@ -49,28 +52,6 @@ CHUNK_MATERIAL_TEMPLATE = """
 ## 見出し候補
 - 要約材料...
 """
-
-FINAL_SUMMARY_FROM_MATERIALS_TEMPLATE = """
-以下はPDF全文を分割して抽出した、章・節・見出しごとの材料メモです。
-これらを統合し、資料全体の目次・章・節に沿ったMarkdown要約を作成してください。
-
-出力形式:
-- 資料名が読み取れる場合は最初に `# 資料名` を置く
-- 以降は `## 見出し名` で区切る
-- 各見出しの本文は400字以内
-- 各見出しの本文は2〜5個程度の箇条書きを基本にする
-- 同じ章・節の重複は統合する
-- チャンク境界で分断された同一章は1つにまとめる
-- 目次らしい順番が読み取れる場合は、その順番を優先する
-- 順番が不明な場合は資料内に出てきた順に並べる
-
-条件:
-- 日本語で出力
-- 現場スタッフが読んで使える具体性にする
-- 資料にない内容を推測で補わない
-- OCR不良で判読できない範囲は「OCR結果からは判読困難です」と明記する
-"""
-
 
 def env(name, default=""):
     value = os.environ.get(name, default)
@@ -470,14 +451,6 @@ def summarize_chunk(chunk, index, total):
     return invoke_bedrock(prompt, max_tokens=3000)
 
 
-def generate_summary_from_materials(materials):
-    joined_materials = "\n\n".join(
-        f"# 分割材料 {index + 1}\n{material}" for index, material in enumerate(materials)
-    )
-    prompt = f"{FINAL_SUMMARY_FROM_MATERIALS_TEMPLATE}\n\n分割材料メモ:\n{joined_materials}"
-    return invoke_bedrock(prompt, max_tokens=8192)
-
-
 def generate_chunked_summary(bucket, file_id, extracted_text):
     chunks = split_text_for_summary(extracted_text)
     if len(chunks) == 1:
@@ -503,7 +476,7 @@ def generate_chunked_summary(bucket, file_id, extracted_text):
         ),
         "application/json; charset=utf-8",
     )
-    return generate_summary_from_materials(materials), materials
+    return "\n\n".join(material.strip() for material in materials if material.strip()), materials
 
 
 def generate_summary(event):
