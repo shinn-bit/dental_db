@@ -187,7 +187,10 @@ export function ManualGeneratorPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content, theme: generatedTheme })
       });
-      if (!res.ok) throw new Error("ダウンロードに失敗しました");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(`docx エラー ${res.status}: ${errData.error ?? "不明"}`);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
