@@ -413,7 +413,7 @@ export function ManualGeneratorPanel() {
         el.style.width = "960px";
         el.style.height = "540px";
 
-        const dataUrl = await toPng(el, { width: 960, height: 540, pixelRatio: 2 });
+        const dataUrl = await toPng(el, { width: 960, height: 540, pixelRatio: 1, fontEmbedCSS: "" });
         const slide = prs.addSlide();
         slide.addImage({ data: dataUrl, x: 0, y: 0, w: "100%", h: "100%" });
       }
