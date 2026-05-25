@@ -132,7 +132,10 @@ export function ManualGeneratorPanel() {
       );
 
       if (!response.ok || !response.body) {
-        throw new Error(`Gemini API エラー: ${response.status}`);
+        const errText = await response.text().catch(() => "");
+        let detail = errText;
+        try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
+        throw new Error(`Gemini API エラー ${response.status}: ${detail}`);
       }
 
       // SSE ストリームを読む
