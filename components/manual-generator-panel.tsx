@@ -294,6 +294,14 @@ export function ManualGeneratorPanel() {
           "- 外部画像URL禁止。図・アイコンはSVGで描く",
           "- カラー: ネイビー #0d2350/#1a3a6c、アクセント #5b9bd5/#4a7fc1、本文背景 #f7f9fc、テキスト #3d4a6b",
           "",
+          "【レイアウト制約（必ず守ること）】",
+          "- すべての要素は width:960px, height:540px の範囲内に収める",
+          "- テキスト要素には必ず overflow:hidden を指定する",
+          "- 絶対配置の要素同士が重ならないよう top/left/width/height を厳密に計算する",
+          "- 見出し: font-size 20〜26px、本文・箇条書き: font-size 14〜17px",
+          "- 1スライドの情報量を絞る（箇条書き最大4項目、各項目25字以内）",
+          "- コンテンツ量が多い場合は font-size を小さくして収める（最小13px）",
+          "",
           "【使えるビジュアル表現（自由に組み合わせてよい）】",
           "SVGフローチャート / SVGタイムライン / SVG棒グラフ・円グラフ / 2カラム比較レイアウト",
           "/ グリッドカード / HTMLテーブル / チェックリスト / SVGアイコン付き説明カード / SVG警告バナー",
@@ -308,16 +316,16 @@ export function ManualGeneratorPanel() {
         ].filter(Boolean).join("\n");
 
         if (compareMode) {
-          setNotice("1/2  gemini-2.5-flash 生成中… (約30〜60秒)");
+          setNotice("1/2  gemini-2.5-flash (1回目) 生成中…");
           const flashSlides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
           setSlidesHtmlFlash(flashSlides);
-          setNotice("2/2  gemini-2.5-pro 生成中… (約30〜60秒、混雑時は自動リトライ)");
-          const proSlides = await generateSlideJson(GEMINI_PRO_MODEL, slidePrompt, slideSysPrompt);
+          setNotice("2/2  gemini-2.5-flash (2回目) 生成中…");
+          const proSlides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
           setSlidesHtml(proSlides);
         } else {
-          setNotice("gemini-2.5-pro でスライドを生成中… (約30〜60秒、混雑時は自動リトライ)");
-          const proSlides = await generateSlideJson(GEMINI_PRO_MODEL, slidePrompt, slideSysPrompt);
-          setSlidesHtml(proSlides);
+          setNotice("gemini-2.5-flash でスライドを生成中…");
+          const slides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
+          setSlidesHtml(slides);
         }
         setNotice("");
       } else {
