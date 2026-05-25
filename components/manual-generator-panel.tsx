@@ -8,8 +8,7 @@ import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
 const GEMINI_API_KEY        = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
-const GEMINI_FLASH_MODEL    = "gemini-2.5-flash";
-const GEMINI_PRO_MODEL      = "gemini-2.5-pro";
+const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
 
 async function streamGenerate(
   model: string,
@@ -189,22 +188,16 @@ export function ManualGeneratorPanel() {
 
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
-  const [compareMode, setCompareMode] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [content, setContent] = useState("");
   const [slidesHtml, setSlidesHtml] = useState<string[]>([]);
-  const [slidesHtmlFlash, setSlidesHtmlFlash] = useState<string[]>([]);
   const [generatedTheme, setGeneratedTheme] = useState("");
 
   const slideIframeSrc = useMemo(
     () => slidesHtml.length ? buildSlideIframeHtml(slidesHtml, generatedTheme) : "",
     [slidesHtml, generatedTheme]
-  );
-  const slideFlashIframeSrc = useMemo(
-    () => slidesHtmlFlash.length ? buildSlideIframeHtml(slidesHtmlFlash, `[Flash] ${generatedTheme}`) : "",
-    [slidesHtmlFlash, generatedTheme]
   );
 
   const selectedFiles = useMemo(
@@ -250,7 +243,6 @@ export function ManualGeneratorPanel() {
     setNotice("院内資料を取得中…");
     setContent("");
     setSlidesHtml([]);
-    setSlidesHtmlFlash([]);
     setGeneratedTheme("");
 
     const currentTheme = theme.trim();
@@ -315,18 +307,9 @@ export function ManualGeneratorPanel() {
           context,
         ].filter(Boolean).join("\n");
 
-        if (compareMode) {
-          setNotice("1/2  gemini-2.5-flash (1回目) 生成中…");
-          const flashSlides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
-          setSlidesHtmlFlash(flashSlides);
-          setNotice("2/2  gemini-2.5-flash (2回目) 生成中…");
-          const proSlides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
-          setSlidesHtml(proSlides);
-        } else {
-          setNotice("gemini-2.5-flash でスライドを生成中…");
-          const slides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
-          setSlidesHtml(slides);
-        }
+        setNotice("gemini-2.5-flash でスライドを生成中…");
+        const slides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
+        setSlidesHtml(slides);
         setNotice("");
       } else {
         const wordSysPrompt = "あなたは歯科医院の院内マニュアル作成AIです。指定された構成で日本語のマニュアルを作成してください。";
@@ -486,19 +469,6 @@ export function ManualGeneratorPanel() {
             </div>
           </div>
 
-          {outputType === "slide" ? (
-            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-soft)", cursor: "pointer", userSelect: "none" }}>
-              <input
-                type="checkbox"
-                checked={compareMode}
-                onChange={(e) => setCompareMode(e.target.checked)}
-                style={{ width: 14, height: 14, accentColor: "var(--navy)", cursor: "pointer" }}
-              />
-              モデル比較モード
-              <span style={{ fontSize: 11, color: "var(--ink-muted)" }}>Flash vs Pro（2回生成）</span>
-            </label>
-          ) : null}
-
           <Button onClick={generate} disabled={!theme.trim() || loading} style={{ gap: 8 }}>
             <Sparkles size={16} aria-hidden="true" />
             {loading ? "生成中…" : "マニュアルを生成"}
@@ -518,16 +488,10 @@ export function ManualGeneratorPanel() {
               {!loading ? (
                 generatedOutputType === "slide" ? (
                   <div className="row" style={{ gap: 6 }}>
-                    {slidesHtmlFlash.length > 0 ? (
-                      <Button variant="ghost" onClick={() => openSlidePreview(slideFlashIframeSrc, `[Flash] ${generatedTheme}`)}
-                        style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
-                        <ExternalLink size={13} aria-hidden="true" />Flash 別タブ
-                      </Button>
-                    ) : null}
                     {slidesHtml.length > 0 ? (
                       <Button variant="ghost" onClick={() => openSlidePreview(slideIframeSrc, generatedTheme)}
                         style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
-                        <ExternalLink size={13} aria-hidden="true" />{slidesHtmlFlash.length > 0 ? "Pro 別タブ" : "別タブで開く"}
+                        <ExternalLink size={13} aria-hidden="true" />別タブで開く
                       </Button>
                     ) : null}
                   </div>
