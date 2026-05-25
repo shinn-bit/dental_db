@@ -7,8 +7,145 @@ import { Check, Download, ExternalLink, FileText, Search, Sparkles, X } from "lu
 import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
-const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_API_KEY        = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
+const GEMINI_FLASH_MODEL    = "gemini-2.5-flash";
+const GEMINI_PRO_MODEL      = "gemini-2.5-pro";
+
+async function streamGenerate(
+  model: string,
+  prompt: string,
+  systemPrompt: string,
+  onChunk: (accumulated: string) => void
+): Promise<void> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 65536, temperature: 0.3 }
+      })
+    }
+  );
+  if (!res.ok || !res.body) {
+    const errText = await res.text().catch(() => "");
+    let detail = errText;
+    try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
+    throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = "";
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const json = line.slice(6).trim();
+      if (!json || json === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(json) as {
+          candidates?: { content?: { parts?: { text?: string }[] } }[];
+        };
+        const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+        if (text) { accumulated += text; onChunk(accumulated); }
+      } catch {}
+    }
+  }
+}
+
+async function generateSlideJson(
+  model: string,
+  prompt: string,
+  systemPrompt: string
+): Promise<string[]> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: 65536,
+          temperature: 0.4,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: "OBJECT",
+            properties: {
+              slides: {
+                type: "ARRAY",
+                items: {
+                  type: "OBJECT",
+                  properties: { html: { type: "STRING" } },
+                  required: ["html"]
+                }
+              }
+            },
+            required: ["slides"]
+          }
+        }
+      })
+    }
+  );
+  if (!res.ok) {
+    const errText = await res.text().catch(() => "");
+    let detail = errText;
+    try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
+    throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
+  }
+  const data = await res.json() as {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+  };
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+  const parsed = JSON.parse(text) as { slides?: Array<{ html?: string }> };
+  return (parsed.slides ?? []).map(s => s.html ?? "").filter(Boolean);
+}
+
+function buildSlideIframeHtml(slides: string[], slideTheme: string): string {
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const wrappedSlides = slides
+    .map(html => `<div class="sw">${html}</div>`)
+    .join("\n");
+  return `<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8">
+<title>${esc(slideTheme)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#111827;padding:20px 0 40px;display:flex;flex-direction:column;align-items:flex-start}
+.sw{flex-shrink:0;margin-bottom:0}
+</style>
+</head>
+<body>${wrappedSlides}
+<script>(function(){
+function fit(){
+  var w=window.innerWidth;
+  var s=Math.min(w/960,1);
+  var ml=Math.max((w-960*s)/2,0);
+  document.querySelectorAll('.sw').forEach(function(wrap){
+    var el=wrap.firstElementChild;
+    if(!el)return;
+    el.style.transform='scale('+s+')';
+    el.style.transformOrigin='top left';
+    el.style.display='block';
+    wrap.style.width=(960*s)+'px';
+    wrap.style.height=(540*s+24)+'px';
+    wrap.style.marginLeft=ml+'px';
+  });
+}
+window.addEventListener('resize',fit);fit();
+})();</script>
+</body></html>`;
+}
 
 const MANUAL_SECTIONS = [
   "病気の解説",
@@ -23,20 +160,6 @@ const MANUAL_SECTIONS = [
   "その他注意すべきこと"
 ];
 
-const SLIDE_SECTIONS = [
-  "タイトル",
-  "定義・概要",
-  "原因・背景",
-  "症状・臨床所見",
-  "応急処置",
-  "治療方針",
-  "治療ステップ①",
-  "治療ステップ②",
-  "確認チェックリスト",
-  "予後・メンテナンス",
-  "注意事項",
-  "まとめ"
-];
 
 export function ManualGeneratorPanel() {
   const [theme, setTheme] = useState("");
@@ -49,11 +172,23 @@ export function ManualGeneratorPanel() {
 
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
+  const [compareMode, setCompareMode] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
   const [content, setContent] = useState("");
+  const [slidesHtml, setSlidesHtml] = useState<string[]>([]);
+  const [slidesHtmlFlash, setSlidesHtmlFlash] = useState<string[]>([]);
   const [generatedTheme, setGeneratedTheme] = useState("");
+
+  const slideIframeSrc = useMemo(
+    () => slidesHtml.length ? buildSlideIframeHtml(slidesHtml, generatedTheme) : "",
+    [slidesHtml, generatedTheme]
+  );
+  const slideFlashIframeSrc = useMemo(
+    () => slidesHtmlFlash.length ? buildSlideIframeHtml(slidesHtmlFlash, `[Flash] ${generatedTheme}`) : "",
+    [slidesHtmlFlash, generatedTheme]
+  );
 
   const selectedFiles = useMemo(
     () => repositoryFiles.filter((f) => selectedFileIds.includes(f.id)),
@@ -95,14 +230,15 @@ export function ManualGeneratorPanel() {
     }
 
     setLoading(true);
-    setNotice("");
+    setNotice("院内資料を取得中…");
     setContent("");
+    setSlidesHtml([]);
+    setSlidesHtmlFlash([]);
     setGeneratedTheme("");
 
     const currentTheme = theme.trim();
 
     try {
-      // Step 1: 院内資料を KB から取得（軽量・高速）
       const files = selectedFiles.map((f) => ({
         knowledgeBaseKey: f.knowledgeBaseKey,
         summaryKey: f.summaryKey,
@@ -117,93 +253,70 @@ export function ManualGeneratorPanel() {
         ? (await retrieveRes.json() as { passages: string[] })
         : { passages: [] };
 
-      // Step 2: Gemini でストリーミング生成（ブラウザから直接）
       const isSlide = outputType === "slide";
       const context = passages.length > 0
         ? `\n\n【院内資料（参考）】\n${passages.join("\n\n")}`
         : "";
 
-      const prompt = isSlide
-        ? [
-            `テーマ: ${currentTheme}`,
-            "",
-            "以下の形式で歯科医院スタッフ向けプレゼンテーションスライドを日本語で作成してください。",
-            "- 各スライドは行「---」で区切る",
-            "- スライドのタイトルは「# タイトル」形式のみ使う",
-            "- 1枚目のみ「## サブタイトル」を追加可",
-            "- 本文は「- 」形式の箇条書きのみ（1スライド3〜5項目）",
-            "- 各項目は25字以内で簡潔に",
-            "- 番号付きリスト禁止",
-            context,
-            "",
-            SLIDE_SECTIONS.map((s, i) => `# ${i === 0 ? s : `${i}. ${s}`}`).join("\n---\n")
-          ].filter(Boolean).join("\n")
-        : [
-            `テーマ: ${currentTheme}`,
-            "",
-            "以下の10項目構成で院内マニュアルを日本語で作成してください。",
-            "各項目は「## 1. 病気の解説」のようにMarkdown見出し（##）で始め、その下に内容を記載してください。",
-            "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式の箇条書きにしてください。",
-            context,
-            "",
-            MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`).join("\n")
-          ].filter(Boolean).join("\n");
+      if (isSlide) {
+        const slideSysPrompt = [
+          "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
+          "歯科医院スタッフが直感的に理解できるプレゼンテーションを、HTML/CSS/SVGを駆使して生成します。",
+          "テキストを単純に並べるのではなく、フローチャート・比較表・グラフ・タイムラインなど、内容に応じた最適なビジュアルを積極的に採用してください。",
+        ].join("\n");
 
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            system_instruction: {
-              parts: [{ text: isSlide
-                ? "あなたは歯科医院のスタッフ研修用スライド作成AIです。指定された形式で日本語のプレゼンテーションを作成してください。"
-                : "あなたは歯科医院の院内マニュアル作成AIです。指定された構成で日本語のマニュアルを作成してください。" }]
-            },
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 65536, temperature: 0.3 }
-          })
+        const slidePrompt = [
+          `テーマ: ${currentTheme}`,
+          "",
+          "歯科医院スタッフ向けプレゼンテーション（12枚）のHTMLスライドを作成してください。",
+          "",
+          "【各スライドの仕様】",
+          "- サイズ: position:relative; overflow:hidden; width:960px; height:540px",
+          "- フォント: 'Noto Sans JP',sans-serif（ページで読込済み）、見出しに 'Noto Serif JP' も使用可",
+          "- スタイルはすべてstyle属性にインライン記述（classは使わない）",
+          "- 外部画像URL禁止。図・アイコンはSVGで描く",
+          "- カラー: ネイビー #0d2350/#1a3a6c、アクセント #5b9bd5/#4a7fc1、本文背景 #f7f9fc、テキスト #3d4a6b",
+          "",
+          "【使えるビジュアル表現（自由に組み合わせてよい）】",
+          "SVGフローチャート / SVGタイムライン / SVG棒グラフ・円グラフ / 2カラム比較レイアウト",
+          "/ グリッドカード / HTMLテーブル / チェックリスト / SVGアイコン付き説明カード / SVG警告バナー",
+          "→ 同じ種類を連続して使わず、各スライドの内容に最も適したビジュアルを自律的に選ぶこと",
+          "→ テキストの羅列にしないこと。必ず何らかのビジュアル要素を含める",
+          "",
+          "【構成（12枚）】",
+          "1枚目: タイトル（ネイビー背景、テーマを大きく）",
+          "2〜11枚目: 定義→原因→症状→診断→治療手順→注意事項の流れでカバー",
+          "12枚目: まとめ・重要ポイント",
+          context,
+        ].filter(Boolean).join("\n");
+
+        if (compareMode) {
+          setNotice("1/2  gemini-2.5-flash 生成中… (約30〜60秒)");
+          const flashSlides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
+          setSlidesHtmlFlash(flashSlides);
+          setNotice("2/2  gemini-2.5-pro 生成中… (約30〜60秒)");
+          const proSlides = await generateSlideJson(GEMINI_PRO_MODEL, slidePrompt, slideSysPrompt);
+          setSlidesHtml(proSlides);
+        } else {
+          setNotice("gemini-2.5-pro でスライドを生成中… (約30〜60秒)");
+          const proSlides = await generateSlideJson(GEMINI_PRO_MODEL, slidePrompt, slideSysPrompt);
+          setSlidesHtml(proSlides);
         }
-      );
-
-      if (!response.ok || !response.body) {
-        const errText = await response.text().catch(() => "");
-        let detail = errText;
-        try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
-        throw new Error(`Gemini API エラー ${response.status}: ${detail}`);
-      }
-
-      // SSE ストリームを読む
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      let buffer = "";
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-          const json = line.slice(6).trim();
-          if (!json || json === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(json) as {
-              candidates?: { content?: { parts?: { text?: string }[] } }[];
-            };
-            const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-            if (text) {
-              accumulated += text;
-              setContent(accumulated);
-            }
-          } catch {
-            // malformed chunk は無視
-          }
-        }
+        setNotice("");
+      } else {
+        const wordSysPrompt = "あなたは歯科医院の院内マニュアル作成AIです。指定された構成で日本語のマニュアルを作成してください。";
+        const wordPrompt = [
+          `テーマ: ${currentTheme}`,
+          "",
+          "以下の10項目構成で院内マニュアルを日本語で作成してください。",
+          "各項目は「## 1. 病気の解説」のようにMarkdown見出し（##）で始め、その下に内容を記載してください。",
+          "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式の箇条書きにしてください。",
+          context,
+          "",
+          MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`).join("\n")
+        ].filter(Boolean).join("\n");
+        setNotice("");
+        await streamGenerate(GEMINI_FLASH_MODEL, wordPrompt, wordSysPrompt, setContent);
       }
 
       setGeneratedTheme(currentTheme);
@@ -239,108 +352,13 @@ export function ManualGeneratorPanel() {
     }
   }
 
-  function generateSlideHtml(markdown: string, slideTheme: string): string {
-    type SlideData = { title: string; subtitle?: string; bullets: string[] };
-    const slides: SlideData[] = markdown
-      .split(/(?:^|\n)---(?:\n|$)/)
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const lines = part.split("\n").map((l) => l.trim()).filter(Boolean);
-        const title = (lines.find((l) => l.startsWith("# ")) ?? "").slice(2).trim();
-        const subtitle = lines.find((l) => l.startsWith("## "))?.slice(3).trim();
-        const bullets = lines
-          .filter((l) => l.startsWith("- ") || l.startsWith("* "))
-          .map((l) => l.slice(2).trim())
-          .filter(Boolean);
-        return { title, subtitle, bullets };
-      });
-    if (slides.length === 0) return "";
-
-    const esc = (s: string) =>
-      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-    const slideHtmls = slides.map((slide, i) => {
-      if (i === 0) {
-        return `<div class="slide ts">
-          <div class="cl"></div><div class="cs"></div>
-          <div class="al"></div>
-          <div class="tt"><h1>${esc(slide.title)}</h1>${slide.subtitle ? `<p class="sub">${esc(slide.subtitle)}</p>` : ""}</div>
-          <div class="tf"></div>
-        </div>`;
-      }
-      const bulletsHtml = slide.bullets.map((b) => `<li>&#9658;&ensp;${esc(b)}</li>`).join("");
-      return `<div class="slide cs-slide">
-        <div class="hd"><div class="hdr"></div><h2>${esc(slide.title)}</h2><div class="badge">${i}</div></div>
-        <div class="stripe"></div>
-        <div class="card"><ul>${bulletsHtml}</ul></div>
-        <div class="ft"><span>${i} / ${slides.length - 1}</span></div>
-      </div>`;
-    }).join("\n");
-
-    return `<!DOCTYPE html>
-<html lang="ja"><head>
-<meta charset="utf-8">
-<title>${esc(slideTheme)}</title>
-<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#111827;font-family:'Noto Sans JP',sans-serif;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:28px}
-.slide{position:relative;width:960px;height:540px;overflow:hidden;border-radius:6px;box-shadow:0 10px 50px rgba(0,0,0,.6);flex-shrink:0}
-.ts{background:#0d2350}
-.cl{position:absolute;right:-105px;bottom:-105px;width:510px;height:510px;border-radius:50%;background:rgba(42,82,152,.3)}
-.cs{position:absolute;left:-115px;top:-115px;width:330px;height:330px;border-radius:50%;background:rgba(74,127,193,.25)}
-.al{position:absolute;left:56px;top:230px;width:848px;height:5px;background:#5b9bd5;border-radius:3px}
-.tt{position:absolute;left:56px;top:243px;width:848px;display:flex;flex-direction:column;align-items:center;gap:16px}
-.tt h1{font-family:'Noto Serif JP',serif;font-size:46px;font-weight:700;color:#fff;text-align:center;text-shadow:0 2px 8px rgba(0,0,0,.5);line-height:1.3;word-break:break-word}
-.sub{font-size:21px;color:#aac8f5;text-align:center}
-.tf{position:absolute;bottom:0;left:0;width:100%;height:40px;background:rgba(26,58,108,.55)}
-.cs-slide{background:#f7f9fc}
-.hd{position:absolute;top:0;left:0;width:100%;height:107px;background:#0d2350;display:flex;align-items:center;padding:0 90px 0 28px}
-.hdr{position:absolute;top:0;right:0;width:50%;height:107px;background:rgba(26,58,108,.28)}
-.hd h2{font-size:24px;font-weight:700;color:#fff;line-height:1.3;position:relative;z-index:1}
-.badge{position:absolute;top:16px;right:14px;width:74px;height:74px;border-radius:50%;background:#5b9bd5;color:#fff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
-.stripe{position:absolute;top:107px;left:0;width:11px;height:100%;background:#4a7fc1}
-.card{position:absolute;top:120px;left:26px;right:26px;bottom:22px;background:#fff;border:1px solid #e0e4f0;border-radius:10px;padding:22px 28px;overflow:hidden}
-ul{list-style:none;display:flex;flex-direction:column;gap:16px}
-li{font-size:19px;color:#3d4a6b;line-height:1.55}
-.ft{position:absolute;bottom:0;left:0;width:100%;height:21px;background:#1a3a6c;display:flex;align-items:center;justify-content:flex-end;padding-right:14px}
-.ft span{font-size:10px;color:#fff}
-</style></head>
-<body>${slideHtmls}</body></html>`;
-  }
-
-  function previewHtml() {
-    if (!content || !generatedTheme) return;
-    const html = generateSlideHtml(content, generatedTheme);
-    if (!html) return;
-    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank");
-  }
-
-  async function downloadPptx() {
-    if (!content || !generatedTheme) return;
-    try {
-      const res = await fetch("/api/generate-manual/pptx", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, theme: generatedTheme })
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({})) as { error?: string };
-        throw new Error(`pptx エラー ${res.status}: ${errData.error ?? "不明"}`);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${generatedTheme}.pptx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "ダウンロードに失敗しました");
-    }
+  function openSlidePreview(src: string, filename: string) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([src], { type: "text/html;charset=utf-8" }));
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.click();
+    void filename;
   }
 
   return (
@@ -443,6 +461,19 @@ li{font-size:19px;color:#3d4a6b;line-height:1.55}
             </div>
           </div>
 
+          {outputType === "slide" ? (
+            <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--ink-soft)", cursor: "pointer", userSelect: "none" }}>
+              <input
+                type="checkbox"
+                checked={compareMode}
+                onChange={(e) => setCompareMode(e.target.checked)}
+                style={{ width: 14, height: 14, accentColor: "var(--navy)", cursor: "pointer" }}
+              />
+              モデル比較モード
+              <span style={{ fontSize: 11, color: "var(--ink-muted)" }}>Flash vs Pro（2回生成）</span>
+            </label>
+          ) : null}
+
           <Button onClick={generate} disabled={!theme.trim() || loading} style={{ gap: 8 }}>
             <Sparkles size={16} aria-hidden="true" />
             {loading ? "生成中…" : "マニュアルを生成"}
@@ -451,42 +482,71 @@ li{font-size:19px;color:#3d4a6b;line-height:1.55}
           {notice ? <p className="tag accent" style={{ alignSelf: "flex-start" }}>{notice}</p> : null}
         </div>
 
-        {content || loading ? (
+        {(content || slidesHtml.length > 0 || loading) ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div className="between" style={{ padding: "14px 24px 10px", borderBottom: "1px solid var(--line-soft)" }}>
+            <div className="between" style={{ padding: "10px 24px", borderBottom: "1px solid var(--line-soft)", flexShrink: 0 }}>
               <span className="row" style={{ gap: 8, fontSize: 13 }}>
                 {loading
-                  ? <><span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} /><span style={{ color: "var(--ink-muted)" }}>生成中…</span></>
-                  : <span className="tiny soft" style={{ letterSpacing: "0.08em" }}>プレビュー</span>}
+                  ? <><span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} /><span style={{ color: "var(--ink-muted)", fontSize: 12 }}>{notice || "生成中…"}</span></>
+                  : <span className="tiny soft">{generatedOutputType === "slide" ? `スライド ${slidesHtml.length} 枚` : "プレビュー"}</span>}
               </span>
-              {!loading && content ? (
+              {!loading ? (
                 generatedOutputType === "slide" ? (
-                  <div className="row" style={{ gap: 8 }}>
-                    <Button variant="ghost" onClick={previewHtml} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
-                      <ExternalLink size={14} aria-hidden="true" />
-                      HTMLプレビュー
-                    </Button>
-                    <Button variant="secondary" onClick={downloadPptx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
-                      <Download size={14} aria-hidden="true" />
-                      PowerPoint (.pptx) でダウンロード
-                    </Button>
+                  <div className="row" style={{ gap: 6 }}>
+                    {slidesHtmlFlash.length > 0 ? (
+                      <Button variant="ghost" onClick={() => openSlidePreview(slideFlashIframeSrc, `[Flash] ${generatedTheme}`)}
+                        style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                        <ExternalLink size={13} aria-hidden="true" />Flash 別タブ
+                      </Button>
+                    ) : null}
+                    {slidesHtml.length > 0 ? (
+                      <Button variant="ghost" onClick={() => openSlidePreview(slideIframeSrc, generatedTheme)}
+                        style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                        <ExternalLink size={13} aria-hidden="true" />{slidesHtmlFlash.length > 0 ? "Pro 別タブ" : "別タブで開く"}
+                      </Button>
+                    ) : null}
                   </div>
                 ) : (
-                  <Button variant="secondary" onClick={downloadDocx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
-                    <Download size={14} aria-hidden="true" />
-                    Word (.docx) でダウンロード
-                  </Button>
+                  content ? (
+                    <Button variant="secondary" onClick={downloadDocx}
+                      style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
+                      <Download size={14} aria-hidden="true" />
+                      Word (.docx) でダウンロード
+                    </Button>
+                  ) : null
                 )
               ) : null}
             </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-              {generatedTheme ? (
-                <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>{generatedTheme}</h1>
-              ) : null}
-              <div className="prose">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+
+            {/* スライドのインラインプレビュー */}
+            {generatedOutputType === "slide" ? (
+              !loading && slidesHtml.length > 0 ? (
+                <iframe
+                  key={slideIframeSrc.length}
+                  srcDoc={slideIframeSrc}
+                  style={{ flex: 1, width: "100%", border: "none", minHeight: 0 }}
+                  title="スライドプレビュー"
+                />
+              ) : (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--ink-faint)" }}>
+                  {loading ? (
+                    <>
+                      <span className="dot ok" style={{ width: 10, height: 10, animation: "pulse 1.2s infinite" }} />
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)", textAlign: "center" }}>{notice}</p>
+                    </>
+                  ) : null}
+                </div>
+              )
+            ) : (
+              <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+                {generatedTheme ? (
+                  <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>{generatedTheme}</h1>
+                ) : null}
+                <div className="prose">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--ink-faint)", padding: 32 }}>
