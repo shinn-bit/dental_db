@@ -172,6 +172,7 @@ export function ManualGeneratorPanel() {
       }
 
       setGeneratedTheme(currentTheme);
+      await downloadDocx(accumulated, currentTheme);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
     } finally {
@@ -179,20 +180,22 @@ export function ManualGeneratorPanel() {
     }
   }
 
-  async function downloadDocx() {
-    if (!content || !generatedTheme) return;
+  async function downloadDocx(overrideContent?: string, overrideTheme?: string) {
+    const docContent = overrideContent ?? content;
+    const docTheme = overrideTheme ?? generatedTheme;
+    if (!docContent || !docTheme) return;
     try {
       const res = await fetch("/api/generate-manual/docx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content, theme: generatedTheme })
+        body: JSON.stringify({ content: docContent, theme: docTheme })
       });
       if (!res.ok) throw new Error("ダウンロードに失敗しました");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${generatedTheme}.docx`;
+      a.download = `${docTheme}.docx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
