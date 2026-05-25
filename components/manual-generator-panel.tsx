@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Download, FileText, Search, Sparkles, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileText, Search, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
@@ -239,6 +239,86 @@ export function ManualGeneratorPanel() {
     }
   }
 
+  function generateSlideHtml(markdown: string, slideTheme: string): string {
+    type SlideData = { title: string; subtitle?: string; bullets: string[] };
+    const slides: SlideData[] = markdown
+      .split(/(?:^|\n)---(?:\n|$)/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((part) => {
+        const lines = part.split("\n").map((l) => l.trim()).filter(Boolean);
+        const title = (lines.find((l) => l.startsWith("# ")) ?? "").slice(2).trim();
+        const subtitle = lines.find((l) => l.startsWith("## "))?.slice(3).trim();
+        const bullets = lines
+          .filter((l) => l.startsWith("- ") || l.startsWith("* "))
+          .map((l) => l.slice(2).trim())
+          .filter(Boolean);
+        return { title, subtitle, bullets };
+      });
+    if (slides.length === 0) return "";
+
+    const esc = (s: string) =>
+      s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+    const slideHtmls = slides.map((slide, i) => {
+      if (i === 0) {
+        return `<div class="slide ts">
+          <div class="cl"></div><div class="cs"></div>
+          <div class="al"></div>
+          <div class="tt"><h1>${esc(slide.title)}</h1>${slide.subtitle ? `<p class="sub">${esc(slide.subtitle)}</p>` : ""}</div>
+          <div class="tf"></div>
+        </div>`;
+      }
+      const bulletsHtml = slide.bullets.map((b) => `<li>&#9658;&ensp;${esc(b)}</li>`).join("");
+      return `<div class="slide cs-slide">
+        <div class="hd"><div class="hdr"></div><h2>${esc(slide.title)}</h2><div class="badge">${i}</div></div>
+        <div class="stripe"></div>
+        <div class="card"><ul>${bulletsHtml}</ul></div>
+        <div class="ft"><span>${i} / ${slides.length - 1}</span></div>
+      </div>`;
+    }).join("\n");
+
+    return `<!DOCTYPE html>
+<html lang="ja"><head>
+<meta charset="utf-8">
+<title>${esc(slideTheme)}</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Noto+Serif+JP:wght@700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#111827;font-family:'Noto Sans JP',sans-serif;padding:40px 20px;display:flex;flex-direction:column;align-items:center;gap:28px}
+.slide{position:relative;width:960px;height:540px;overflow:hidden;border-radius:6px;box-shadow:0 10px 50px rgba(0,0,0,.6);flex-shrink:0}
+.ts{background:#0d2350}
+.cl{position:absolute;right:-105px;bottom:-105px;width:510px;height:510px;border-radius:50%;background:rgba(42,82,152,.3)}
+.cs{position:absolute;left:-115px;top:-115px;width:330px;height:330px;border-radius:50%;background:rgba(74,127,193,.25)}
+.al{position:absolute;left:56px;top:230px;width:848px;height:5px;background:#5b9bd5;border-radius:3px}
+.tt{position:absolute;left:56px;top:243px;width:848px;display:flex;flex-direction:column;align-items:center;gap:16px}
+.tt h1{font-family:'Noto Serif JP',serif;font-size:46px;font-weight:700;color:#fff;text-align:center;text-shadow:0 2px 8px rgba(0,0,0,.5);line-height:1.3;word-break:break-word}
+.sub{font-size:21px;color:#aac8f5;text-align:center}
+.tf{position:absolute;bottom:0;left:0;width:100%;height:40px;background:rgba(26,58,108,.55)}
+.cs-slide{background:#f7f9fc}
+.hd{position:absolute;top:0;left:0;width:100%;height:107px;background:#0d2350;display:flex;align-items:center;padding:0 90px 0 28px}
+.hdr{position:absolute;top:0;right:0;width:50%;height:107px;background:rgba(26,58,108,.28)}
+.hd h2{font-size:24px;font-weight:700;color:#fff;line-height:1.3;position:relative;z-index:1}
+.badge{position:absolute;top:16px;right:14px;width:74px;height:74px;border-radius:50%;background:#5b9bd5;color:#fff;font-size:22px;font-weight:700;display:flex;align-items:center;justify-content:center}
+.stripe{position:absolute;top:107px;left:0;width:11px;height:100%;background:#4a7fc1}
+.card{position:absolute;top:120px;left:26px;right:26px;bottom:22px;background:#fff;border:1px solid #e0e4f0;border-radius:10px;padding:22px 28px;overflow:hidden}
+ul{list-style:none;display:flex;flex-direction:column;gap:16px}
+li{font-size:19px;color:#3d4a6b;line-height:1.55}
+.ft{position:absolute;bottom:0;left:0;width:100%;height:21px;background:#1a3a6c;display:flex;align-items:center;justify-content:flex-end;padding-right:14px}
+.ft span{font-size:10px;color:#fff}
+</style></head>
+<body>${slideHtmls}</body></html>`;
+  }
+
+  function previewHtml() {
+    if (!content || !generatedTheme) return;
+    const html = generateSlideHtml(content, generatedTheme);
+    if (!html) return;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank");
+  }
+
   async function downloadPptx() {
     if (!content || !generatedTheme) return;
     try {
@@ -381,10 +461,16 @@ export function ManualGeneratorPanel() {
               </span>
               {!loading && content ? (
                 generatedOutputType === "slide" ? (
-                  <Button variant="secondary" onClick={downloadPptx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
-                    <Download size={14} aria-hidden="true" />
-                    PowerPoint (.pptx) でダウンロード
-                  </Button>
+                  <div className="row" style={{ gap: 8 }}>
+                    <Button variant="ghost" onClick={previewHtml} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
+                      <ExternalLink size={14} aria-hidden="true" />
+                      HTMLプレビュー
+                    </Button>
+                    <Button variant="secondary" onClick={downloadPptx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
+                      <Download size={14} aria-hidden="true" />
+                      PowerPoint (.pptx) でダウンロード
+                    </Button>
+                  </div>
                 ) : (
                   <Button variant="secondary" onClick={downloadDocx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
                     <Download size={14} aria-hidden="true" />
