@@ -424,7 +424,15 @@ export function FileRepositoryManager() {
   const searching = libQuery.trim().length > 0;
   const searchHits = searching ? files.filter((f) => f.name.toLowerCase().includes(libQuery.toLowerCase())) : [];
   const filesInSub = sub && cat ? files.filter((f) => assignments[f.id]?.catId === cat.id && assignments[f.id]?.subId === sub.id) : [];
-  const unassignedFiles = files.filter((f) => !assignments[f.id]);
+  const unassignedFiles = files.filter((f) => {
+    const a = assignments[f.id];
+    if (!a) return true;
+    const assignedCat = library.find((c) => c.id === a.catId);
+    if (!assignedCat) return true;
+    if (!a.subId) return true;
+    if (!assignedCat.subs.find((s) => s.id === a.subId)) return true;
+    return false;
+  });
 
   const currentCat = library.find((c) => c.id === destCat);
 
