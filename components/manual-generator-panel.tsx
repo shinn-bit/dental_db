@@ -371,9 +371,8 @@ export function ManualGeneratorPanel() {
 
   async function downloadPptx() {
     if (!slidesHtml.length || !generatedTheme) return;
-    setNotice("PPTX 生成中…");
+    setNotice("PPTX 生成中… このタブから離れないでください");
     try {
-      // フォントをページ本体にも読み込む（html-to-image はページの font を使うため）
       if (!document.querySelector('link[href*="Noto+Sans+JP"]')) {
         const link = document.createElement("link");
         link.rel = "stylesheet";
@@ -393,7 +392,21 @@ export function ManualGeneratorPanel() {
       prs.layout = "LAYOUT_16x9";
 
       for (let i = 0; i < slidesHtml.length; i++) {
-        setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length}`);
+        // タブが非アクティブな場合は再アクティブになるまで待つ
+        if (document.visibilityState === "hidden") {
+          setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} ⚠ このタブに戻ってください`);
+          await new Promise<void>(resolve => {
+            const fn = () => {
+              if (document.visibilityState === "visible") {
+                document.removeEventListener("visibilitychange", fn);
+                resolve();
+              }
+            };
+            document.addEventListener("visibilitychange", fn);
+          });
+        }
+        setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} このタブから離れないでください`);
+
         container.innerHTML = slidesHtml[i];
         const el = container.firstElementChild as HTMLElement | null;
         if (!el) continue;
