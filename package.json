@@ -23,6 +23,7 @@
     "clsx": "latest",
     "docx": "^9.6.1",
     "html-to-docx": "^1.8.0",
+    "html-to-image": "^1.11.13",
     "lucide-react": "latest",
     "marked": "^18.0.4",
     "next": "latest",

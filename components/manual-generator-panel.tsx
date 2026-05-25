@@ -369,6 +369,57 @@ export function ManualGeneratorPanel() {
     void filename;
   }
 
+  async function downloadPptx() {
+    if (!slidesHtml.length || !generatedTheme) return;
+    setNotice("PPTX 生成中…");
+    try {
+      // フォントをページ本体にも読み込む（html-to-image はページの font を使うため）
+      if (!document.querySelector('link[href*="Noto+Sans+JP"]')) {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@700&display=swap";
+        document.head.appendChild(link);
+        await document.fonts.ready;
+      }
+
+      const { toPng } = await import("html-to-image");
+      const { default: pptxgen } = await import("pptxgenjs");
+
+      const container = document.createElement("div");
+      container.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:960px;overflow:hidden;";
+      document.body.appendChild(container);
+
+      const prs = new pptxgen();
+      prs.layout = "LAYOUT_16x9";
+
+      for (let i = 0; i < slidesHtml.length; i++) {
+        setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length}`);
+        container.innerHTML = slidesHtml[i];
+        const el = container.firstElementChild as HTMLElement | null;
+        if (!el) continue;
+        el.style.width = "960px";
+        el.style.height = "540px";
+
+        const dataUrl = await toPng(el, { width: 960, height: 540, pixelRatio: 2 });
+        const slide = prs.addSlide();
+        slide.addImage({ data: dataUrl, x: 0, y: 0, w: "100%", h: "100%" });
+      }
+
+      document.body.removeChild(container);
+      setNotice("");
+
+      const blob = await prs.write({ outputType: "blob" }) as Blob;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${generatedTheme}.pptx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "PPTX 生成に失敗しました");
+    }
+  }
+
   return (
     <section className="panel" style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 200px)" }}>
       <div className="panel-head">
@@ -489,10 +540,16 @@ export function ManualGeneratorPanel() {
                 generatedOutputType === "slide" ? (
                   <div className="row" style={{ gap: 6 }}>
                     {slidesHtml.length > 0 ? (
-                      <Button variant="ghost" onClick={() => openSlidePreview(slideIframeSrc, generatedTheme)}
-                        style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
-                        <ExternalLink size={13} aria-hidden="true" />別タブで開く
-                      </Button>
+                      <>
+                        <Button variant="ghost" onClick={() => openSlidePreview(slideIframeSrc, generatedTheme)}
+                          style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                          <ExternalLink size={13} aria-hidden="true" />別タブで開く
+                        </Button>
+                        <Button variant="secondary" onClick={downloadPptx}
+                          style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                          <Download size={13} aria-hidden="true" />PowerPoint (.pptx)
+                        </Button>
+                      </>
                     ) : null}
                   </div>
                 ) : (
@@ -513,7 +570,7 @@ export function ManualGeneratorPanel() {
                 <iframe
                   key={slideIframeSrc.length}
                   srcDoc={slideIframeSrc}
-                  style={{ flex: 1, width: "100%", border: "none", minHeight: 0 }}
+                  style={{ flex: 1, width: "100%", border: "none", minHeight: "500px" }}
                   title="スライドプレビュー"
                 />
               ) : (
