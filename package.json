@@ -27,6 +27,7 @@
     "marked": "^18.0.4",
     "next": "latest",
     "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
     "react": "latest",
     "react-dom": "latest",
     "react-markdown": "^10.1.0",

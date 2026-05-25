@@ -23,6 +23,21 @@ const MANUAL_SECTIONS = [
   "その他注意すべきこと"
 ];
 
+const SLIDE_SECTIONS = [
+  "タイトル",
+  "定義・概要",
+  "原因・背景",
+  "症状・臨床所見",
+  "応急処置",
+  "治療方針",
+  "治療ステップ①",
+  "治療ステップ②",
+  "確認チェックリスト",
+  "予後・メンテナンス",
+  "注意事項",
+  "まとめ"
+];
+
 export function ManualGeneratorPanel() {
   const [theme, setTheme] = useState("");
 
@@ -31,6 +46,9 @@ export function ManualGeneratorPanel() {
   const [filePickerOpen, setFilePickerOpen] = useState(false);
   const [fileQuery, setFileQuery] = useState("");
   const filePickerRef = useRef<HTMLDivElement | null>(null);
+
+  const [outputType, setOutputType] = useState<"word" | "slide">("word");
+  const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -100,21 +118,36 @@ export function ManualGeneratorPanel() {
         : { passages: [] };
 
       // Step 2: Gemini でストリーミング生成（ブラウザから直接）
-      const sectionList = MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`).join("\n");
+      const isSlide = outputType === "slide";
       const context = passages.length > 0
-        ? `\n\n【院内資料（参考）】\n${passages.join("\n\n---\n\n")}`
+        ? `\n\n【院内資料（参考）】\n${passages.join("\n\n")}`
         : "";
 
-      const prompt = [
-        `テーマ: ${currentTheme}`,
-        "",
-        "以下の10項目構成で院内マニュアルを日本語で作成してください。",
-        "各項目は「## 1. 病気の解説」のようにMarkdown見出し（##）で始め、その下に内容を記載してください。",
-        "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式の箇条書きにしてください。",
-        context,
-        "",
-        sectionList
-      ].filter(Boolean).join("\n");
+      const prompt = isSlide
+        ? [
+            `テーマ: ${currentTheme}`,
+            "",
+            "以下の形式で歯科医院スタッフ向けプレゼンテーションスライドを日本語で作成してください。",
+            "- 各スライドは行「---」で区切る",
+            "- スライドのタイトルは「# タイトル」形式のみ使う",
+            "- 1枚目のみ「## サブタイトル」を追加可",
+            "- 本文は「- 」形式の箇条書きのみ（1スライド3〜5項目）",
+            "- 各項目は25字以内で簡潔に",
+            "- 番号付きリスト禁止",
+            context,
+            "",
+            SLIDE_SECTIONS.map((s, i) => `# ${i === 0 ? s : `${i}. ${s}`}`).join("\n---\n")
+          ].filter(Boolean).join("\n")
+        : [
+            `テーマ: ${currentTheme}`,
+            "",
+            "以下の10項目構成で院内マニュアルを日本語で作成してください。",
+            "各項目は「## 1. 病気の解説」のようにMarkdown見出し（##）で始め、その下に内容を記載してください。",
+            "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式の箇条書きにしてください。",
+            context,
+            "",
+            MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`).join("\n")
+          ].filter(Boolean).join("\n");
 
       const response = await fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
@@ -123,7 +156,9 @@ export function ManualGeneratorPanel() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             system_instruction: {
-              parts: [{ text: "あなたは歯科医院の院内マニュアル作成AIです。指定された構成で日本語のマニュアルを作成してください。" }]
+              parts: [{ text: isSlide
+                ? "あなたは歯科医院のスタッフ研修用スライド作成AIです。指定された形式で日本語のプレゼンテーションを作成してください。"
+                : "あなたは歯科医院の院内マニュアル作成AIです。指定された構成で日本語のマニュアルを作成してください。" }]
             },
             contents: [{ role: "user", parts: [{ text: prompt }] }],
             generationConfig: { maxOutputTokens: 65536, temperature: 0.3 }
@@ -172,6 +207,7 @@ export function ManualGeneratorPanel() {
       }
 
       setGeneratedTheme(currentTheme);
+      setGeneratedOutputType(outputType);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
     } finally {
@@ -196,6 +232,30 @@ export function ManualGeneratorPanel() {
       const a = document.createElement("a");
       a.href = url;
       a.download = `${generatedTheme}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "ダウンロードに失敗しました");
+    }
+  }
+
+  async function downloadPptx() {
+    if (!content || !generatedTheme) return;
+    try {
+      const res = await fetch("/api/generate-manual/pptx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, theme: generatedTheme })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(`pptx エラー ${res.status}: ${errData.error ?? "不明"}`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${generatedTheme}.pptx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
@@ -290,6 +350,19 @@ export function ManualGeneratorPanel() {
             ) : null}
           </div>
 
+          {/* 出力形式トグル */}
+          <div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, letterSpacing: "0.1em", color: "var(--ink-soft)", marginBottom: 6 }}>出力形式</label>
+            <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: "var(--radius)", overflow: "hidden" }}>
+              {(["word", "slide"] as const).map((type) => (
+                <button key={type} type="button" onClick={() => setOutputType(type)}
+                  style={{ flex: 1, padding: "9px 0", fontSize: 13, fontWeight: outputType === type ? 600 : 400, background: outputType === type ? "var(--navy)" : "transparent", color: outputType === type ? "#fff" : "var(--ink-soft)", border: 0, cursor: "pointer", transition: "all .15s ease" }}>
+                  {type === "word" ? "ドキュメント（Word）" : "スライド（PowerPoint）"}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <Button onClick={generate} disabled={!theme.trim() || loading} style={{ gap: 8 }}>
             <Sparkles size={16} aria-hidden="true" />
             {loading ? "生成中…" : "マニュアルを生成"}
@@ -307,10 +380,17 @@ export function ManualGeneratorPanel() {
                   : <span className="tiny soft" style={{ letterSpacing: "0.08em" }}>プレビュー</span>}
               </span>
               {!loading && content ? (
-                <Button variant="secondary" onClick={downloadDocx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
-                  <Download size={14} aria-hidden="true" />
-                  Word (.docx) でダウンロード
-                </Button>
+                generatedOutputType === "slide" ? (
+                  <Button variant="secondary" onClick={downloadPptx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
+                    <Download size={14} aria-hidden="true" />
+                    PowerPoint (.pptx) でダウンロード
+                  </Button>
+                ) : (
+                  <Button variant="secondary" onClick={downloadDocx} style={{ gap: 6, fontSize: 13, paddingLeft: 14, paddingRight: 14, height: 34 }}>
+                    <Download size={14} aria-hidden="true" />
+                    Word (.docx) でダウンロード
+                  </Button>
+                )
               ) : null}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
