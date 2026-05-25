@@ -172,7 +172,6 @@ export function ManualGeneratorPanel() {
       }
 
       setGeneratedTheme(currentTheme);
-      await downloadDocx(accumulated, currentTheme);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
     } finally {
