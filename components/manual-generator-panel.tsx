@@ -126,7 +126,7 @@ export function ManualGeneratorPanel() {
               parts: [{ text: "あなたは歯科医院の院内マニュアル作成AIです。指定された構成で日本語のマニュアルを作成してください。" }]
             },
             contents: [{ role: "user", parts: [{ text: prompt }] }],
-            generationConfig: { maxOutputTokens: 8192, temperature: 0.3 }
+            generationConfig: { maxOutputTokens: 65536, temperature: 0.3 }
           })
         }
       );
@@ -179,22 +179,20 @@ export function ManualGeneratorPanel() {
     }
   }
 
-  async function downloadDocx(overrideContent?: string, overrideTheme?: string) {
-    const docContent = overrideContent ?? content;
-    const docTheme = overrideTheme ?? generatedTheme;
-    if (!docContent || !docTheme) return;
+  async function downloadDocx() {
+    if (!content || !generatedTheme) return;
     try {
       const res = await fetch("/api/generate-manual/docx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: docContent, theme: docTheme })
+        body: JSON.stringify({ content, theme: generatedTheme })
       });
       if (!res.ok) throw new Error("ダウンロードに失敗しました");
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${docTheme}.docx`;
+      a.download = `${generatedTheme}.docx`;
       a.click();
       URL.revokeObjectURL(url);
     } catch (error) {

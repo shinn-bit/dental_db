@@ -1,5 +1,13 @@
-import { Document, HeadingLevel, Packer, Paragraph, TextRun } from "docx";
+import { marked } from "marked";
 import { NextResponse } from "next/server";
+
+// html-to-docx has no type declarations; load via require
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const HTMLtoDOCX = require("html-to-docx") as (
+  html: string,
+  headerHtml: null,
+  options: Record<string, unknown>
+) => Promise<Buffer>;
 
 type DocxRequest = {
   content?: string;
@@ -16,17 +24,25 @@ export async function POST(request: Request) {
   }
 
   try {
-    const docxUint8 = await Packer.toBuffer(
-      new Document({
-        sections: [{ properties: {}, children: buildDocxChildren(theme, content) }]
-      })
-    );
+    const bodyHtml = await marked(content, { gfm: true, breaks: false });
+    const fullHtml = `<h1>${escapeHtml(theme)}</h1>${bodyHtml}`;
 
-    return new Response(Buffer.from(docxUint8), {
+    const docxBuffer = await HTMLtoDOCX(fullHtml, null, {
+      title: theme,
+      font: "Yu Mincho",
+      fontSize: 22,
+      complexScriptFontSize: 22,
+      table: { row: { cantSplit: true } },
+      footer: true,
+      pageNumber: true,
+    });
+
+    return new Response(new Uint8Array(docxBuffer), {
       headers: {
-        "Content-Type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "Content-Disposition": `attachment; filename="${encodeURIComponent(theme)}.docx"`
-      }
+        "Content-Type":
+          "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "Content-Disposition": `attachment; filename="${encodeURIComponent(theme)}.docx"`,
+      },
     });
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
@@ -34,80 +50,6 @@ export async function POST(request: Request) {
   }
 }
 
-function buildDocxChildren(theme: string, markdown: string): Paragraph[] {
-  const children: Paragraph[] = [
-    new Paragraph({
-      children: [new TextRun({ text: theme, bold: true, size: 40 })],
-      spacing: { after: 400 }
-    })
-  ];
-
-  for (const line of markdown.split("\n")) {
-    const trimmed = line.trim();
-
-    if (!trimmed) {
-      children.push(new Paragraph({ text: "", spacing: { after: 60 } }));
-      continue;
-    }
-
-    if (trimmed.startsWith("## ")) {
-      children.push(
-        new Paragraph({
-          text: trimmed.slice(3),
-          heading: HeadingLevel.HEADING_1,
-          spacing: { before: 400, after: 160 }
-        })
-      );
-    } else if (trimmed.startsWith("### ")) {
-      children.push(
-        new Paragraph({
-          text: trimmed.slice(4),
-          heading: HeadingLevel.HEADING_2,
-          spacing: { before: 200, after: 100 }
-        })
-      );
-    } else if (/^[-*]\s+\[\s?[x ]?\s?\]/.test(trimmed)) {
-      const text = trimmed.replace(/^[-*]\s+\[\s?[x ]?\s?\]\s*/, "");
-      children.push(
-        new Paragraph({
-          children: [new TextRun({ text: `□  ${text}` })],
-          indent: { left: 360 },
-          spacing: { after: 80 }
-        })
-      );
-    } else if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      children.push(
-        new Paragraph({
-          text: trimmed.slice(2),
-          bullet: { level: 0 },
-          spacing: { after: 60 }
-        })
-      );
-    } else {
-      children.push(
-        new Paragraph({
-          children: parseInline(trimmed),
-          spacing: { after: 120 }
-        })
-      );
-    }
-  }
-
-  return children;
-}
-
-function parseInline(text: string): TextRun[] {
-  const runs: TextRun[] = [];
-  const re = /\*\*(.+?)\*\*/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) runs.push(new TextRun({ text: text.slice(last, m.index) }));
-    runs.push(new TextRun({ text: m[1], bold: true }));
-    last = m.index + m[0].length;
-  }
-
-  if (last < text.length) runs.push(new TextRun({ text: text.slice(last) }));
-  return runs.length > 0 ? runs : [new TextRun({ text })];
+function escapeHtml(s: string) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
