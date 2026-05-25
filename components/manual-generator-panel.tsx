@@ -65,48 +65,65 @@ async function generateSlideJson(
   prompt: string,
   systemPrompt: string
 ): Promise<string[]> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          maxOutputTokens: 65536,
-          temperature: 0.4,
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: "OBJECT",
-            properties: {
-              slides: {
-                type: "ARRAY",
-                items: {
-                  type: "OBJECT",
-                  properties: { html: { type: "STRING" } },
-                  required: ["html"]
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY_MS = 8000;
+
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: {
+            maxOutputTokens: 65536,
+            temperature: 0.4,
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: "OBJECT",
+              properties: {
+                slides: {
+                  type: "ARRAY",
+                  items: {
+                    type: "OBJECT",
+                    properties: { html: { type: "STRING" } },
+                    required: ["html"]
+                  }
                 }
-              }
-            },
-            required: ["slides"]
+              },
+              required: ["slides"]
+            }
           }
-        }
-      })
+        })
+      }
+    );
+
+    if (res.status === 503 && attempt < MAX_RETRIES - 1) {
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
+      continue;
     }
-  );
-  if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    let detail = errText;
-    try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
-    throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "");
+      let detail = errText;
+      try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
+      if (res.status === 503) {
+        throw new Error(`gemini-2.5-pro が混雑しています。しばらく待ってから再試行してください。`);
+      }
+      throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
+    }
+
+    const data = await res.json() as {
+      candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
+    };
+    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
+    const parsed = JSON.parse(text) as { slides?: Array<{ html?: string }> };
+    return (parsed.slides ?? []).map(s => s.html ?? "").filter(Boolean);
   }
-  const data = await res.json() as {
-    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>
-  };
-  const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-  const parsed = JSON.parse(text) as { slides?: Array<{ html?: string }> };
-  return (parsed.slides ?? []).map(s => s.html ?? "").filter(Boolean);
+
+  throw new Error(`gemini-2.5-pro が混雑しています。しばらく待ってから再試行してください。`);
 }
 
 function buildSlideIframeHtml(slides: string[], slideTheme: string): string {
@@ -294,11 +311,11 @@ export function ManualGeneratorPanel() {
           setNotice("1/2  gemini-2.5-flash 生成中… (約30〜60秒)");
           const flashSlides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
           setSlidesHtmlFlash(flashSlides);
-          setNotice("2/2  gemini-2.5-pro 生成中… (約30〜60秒)");
+          setNotice("2/2  gemini-2.5-pro 生成中… (約30〜60秒、混雑時は自動リトライ)");
           const proSlides = await generateSlideJson(GEMINI_PRO_MODEL, slidePrompt, slideSysPrompt);
           setSlidesHtml(proSlides);
         } else {
-          setNotice("gemini-2.5-pro でスライドを生成中… (約30〜60秒)");
+          setNotice("gemini-2.5-pro でスライドを生成中… (約30〜60秒、混雑時は自動リトライ)");
           const proSlides = await generateSlideJson(GEMINI_PRO_MODEL, slidePrompt, slideSysPrompt);
           setSlidesHtml(proSlides);
         }
