@@ -8,7 +8,7 @@ import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
-const GEMINI_MODEL = "gemini-2.0-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 
 const MANUAL_SECTIONS = [
   "病気の解説",
