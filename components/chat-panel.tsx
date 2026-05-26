@@ -166,7 +166,7 @@ export function ChatPanel() {
       const newBedrockSessionId = data.bedrockSessionId ?? "";
       setBedrockSessionId(newBedrockSessionId);
 
-      // Persist to S3 (fire and forget so UI isn't blocked)
+      // Persist to S3 (non-blocking but check for errors)
       const sessionId = currentSessionId ?? crypto.randomUUID();
       const title =
         sessions.find((s) => s.id === sessionId)?.title ?? message.slice(0, 30);
@@ -175,7 +175,19 @@ export function ChatPanel() {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: sessionId, title, bedrockSessionId: newBedrockSessionId, messages: allMessages })
-      }).catch(() => {});
+      }).then((res) => {
+        if (!res.ok) {
+          res.json().then((d: { error?: string }) => {
+            console.error("[chat save] PUT failed:", d.error);
+            setNotice("会話の保存に失敗しました。（管理者に連絡してください）");
+          }).catch(() => {
+            setNotice("会話の保存に失敗しました。");
+          });
+        }
+      }).catch((e) => {
+        console.error("[chat save] network error:", e);
+        setNotice("会話の保存に失敗しました（ネットワークエラー）。");
+      });
 
       if (!currentSessionId) {
         setCurrentSessionId(sessionId);

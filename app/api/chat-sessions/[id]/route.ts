@@ -37,20 +37,22 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const session = (await req.json()) as ChatSession;
-
-  await putS3Text(BUCKET, `${PREFIX}${id}.json`, JSON.stringify(session), "application/json");
-
-  const index = await readIndex();
-  const existing = index.findIndex((s) => s.id === id);
-  if (existing >= 0) {
-    index[existing].title = session.title;
-  } else {
-    index.unshift({ id, title: session.title });
+  try {
+    const session = (await req.json()) as ChatSession;
+    await putS3Text(BUCKET, `${PREFIX}${id}.json`, JSON.stringify(session), "application/json");
+    const index = await readIndex();
+    const existing = index.findIndex((s) => s.id === id);
+    if (existing >= 0) {
+      index[existing].title = session.title;
+    } else {
+      index.unshift({ id, title: session.title });
+    }
+    await writeIndex(index);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[chat-sessions PUT] failed:", err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
   }
-  await writeIndex(index);
-
-  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
