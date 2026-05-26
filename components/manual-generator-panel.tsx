@@ -90,51 +90,74 @@ async function streamGenerate(
   }
 }
 
-async function generateSlideJson(
+async function generateSlidesStreaming(
+  model: string,
+  contents: GeminiContent[],
+  systemPrompt: string,
+  onProgress: (notice: string) => void
+): Promise<string[]> {
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { maxOutputTokens: 65536, temperature: 0.4 }
+      })
+    }
+  );
+  if (!res.ok || !res.body) {
+    const errText = await res.text().catch(() => "");
+    if (res.status === 503) throw new Error("gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。");
+    throw new Error(`Gemini API エラー ${res.status} (${model}): ${errText}`);
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let accumulated = "";
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() ?? "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const json = line.slice(6).trim();
+      if (!json || json === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(json) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
+        const text = parsed.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+        if (text) {
+          accumulated += text;
+          const count = (accumulated.match(/===SLIDE_\d+===/g) ?? []).length;
+          if (count > 0) onProgress(`スライドを生成中… ${count} / 12 枚`);
+        }
+      } catch {}
+    }
+  }
+  // ===SLIDE_N=== デリミタで分割して各スライドの <div> を抽出
+  const slides: string[] = [];
+  const segments = accumulated.split(/===SLIDE_\d+===/);
+  for (const seg of segments) {
+    const trimmed = seg.trim();
+    const match = trimmed.match(/<div[\s\S]*<\/div>/);
+    if (match) slides.push(match[0]);
+  }
+  return slides;
+}
+
+async function generateSingleSlideStreaming(
   model: string,
   contents: GeminiContent[],
   systemPrompt: string
-): Promise<string[]> {
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY_MS = 8000;
-  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system_instruction: { parts: [{ text: systemPrompt }] },
-          contents,
-          generationConfig: {
-            maxOutputTokens: 65536, temperature: 0.4,
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: "OBJECT",
-              properties: { slides: { type: "ARRAY", items: { type: "OBJECT", properties: { html: { type: "STRING" } }, required: ["html"] } } },
-              required: ["slides"]
-            }
-          }
-        })
-      }
-    );
-    if (res.status === 503 && attempt < MAX_RETRIES - 1) {
-      await new Promise(r => setTimeout(r, RETRY_DELAY_MS * (attempt + 1)));
-      continue;
-    }
-    if (!res.ok) {
-      const errText = await res.text().catch(() => "");
-      let detail = errText;
-      try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
-      if (res.status === 503) throw new Error("gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。");
-      throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
-    }
-    const data = await res.json() as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? "{}";
-    const parsed = JSON.parse(text) as { slides?: Array<{ html?: string }> };
-    return (parsed.slides ?? []).map(s => s.html ?? "").filter(Boolean);
-  }
-  throw new Error("gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。");
+): Promise<string> {
+  let accumulated = "";
+  await streamGenerate(model, systemPrompt, contents, text => { accumulated = text; });
+  const match = accumulated.match(/<div[\s\S]*<\/div>/);
+  return match ? match[0] : accumulated.trim();
 }
 
 // ── Slide iframe builder ──────────────────────────────────────────────────────
@@ -191,6 +214,7 @@ const SLIDE_SYS_PROMPT = [
   "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
   "ユーザーの指示に従い、歯科医院スタッフ向けプレゼンテーション（12枚）のHTMLスライドを生成してください。",
   "修正指示がある場合は全スライドを再生成してください。",
+  "【出力形式】各スライドを ===SLIDE_N===（N=1〜12）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。",
   "画像の取り扱い:",
   "- 参考画像: 内容生成の参考としてください",
   "- 埋め込み画像IMAGE_N: 指定された場所に <div data-image=\"N\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入してください",
@@ -224,11 +248,11 @@ function toGeminiContents(
   userText: string,
   userImages: ManualImagePart[]
 ): GeminiContent[] {
-  const contents: GeminiContent[] = history.map(msg => {
-    const parts: GeminiPart[] = [{ text: msg.text || " " }];
-    (msg.images ?? []).forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } }));
-    return { role: msg.role, parts };
-  });
+  // 過去メッセージの inlineData は除外してテキストのみ送る（リクエストサイズ削減）
+  const contents: GeminiContent[] = history.map(msg => ({
+    role: msg.role,
+    parts: [{ text: msg.text || " " }],
+  }));
   const newParts: GeminiPart[] = [{ text: userText || " " }];
   userImages.forEach(img => newParts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } }));
   contents.push({ role: "user", parts: newParts });
@@ -403,28 +427,28 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
         const hasPartialSelection = slidesHtml.length > 0 && editSelectedSlides.length > 0;
 
         if (hasPartialSelection) {
-          // ── 個別スライド修正 ──────────────────────────────────────────────
+          // ── 個別スライド修正（並列）──────────────────────────────────────
           const targets = [...editSelectedSlides].sort((a, b) => a - b);
+          setNotice(`${targets.map(i => `${i + 1}枚目`).join("・")}を並列修正中…`);
+
+          const results = await Promise.all(
+            targets.map(idx => {
+              const editPrompt = [
+                augmentedText,
+                "",
+                `【${idx + 1}枚目のスライドHTML】`,
+                slidesHtml[idx],
+                "",
+                "このスライドを修正指示に従って修正した1枚分の <div>...</div> を返してください。",
+              ].join("\n");
+              const slideContents = toGeminiContents(messages, editPrompt, pendingImages);
+              return generateSingleSlideStreaming(GEMINI_FLASH_MODEL, slideContents, SLIDE_EDIT_SYS_PROMPT)
+                .then(html => ({ idx, html }));
+            })
+          );
+
           const updated = [...slidesHtml];
-
-          for (let n = 0; n < targets.length; n++) {
-            const idx = targets[n];
-            setNotice(`スライドを修正中… ${n + 1} / ${targets.length} (${idx + 1}枚目)`);
-
-            const editPrompt = [
-              augmentedText,
-              "",
-              `【${idx + 1}枚目のスライドHTML】`,
-              slidesHtml[idx],
-              "",
-              "このスライドを修正指示に従って修正した1枚分のHTMLを返してください。",
-            ].join("\n");
-
-            const slideContents = toGeminiContents(messages, editPrompt, pendingImages);
-            const result = await generateSlideJson(GEMINI_FLASH_MODEL, slideContents, SLIDE_EDIT_SYS_PROMPT);
-            if (result.length > 0) updated[idx] = result[0];
-          }
-
+          results.forEach(({ idx, html }) => { if (html) updated[idx] = html; });
           setSlidesHtml(updated);
           setEditSelectedSlides([]);
           setMessages([...newHistory, {
@@ -433,9 +457,9 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
           }]);
           setNotice("");
         } else {
-          // ── 全スライド生成 ────────────────────────────────────────────────
+          // ── 全スライド生成（ストリーミング）──────────────────────────────
           setNotice("スライドを生成中…");
-          const slides = await generateSlideJson(GEMINI_FLASH_MODEL, contents, SLIDE_SYS_PROMPT);
+          const slides = await generateSlidesStreaming(GEMINI_FLASH_MODEL, contents, SLIDE_SYS_PROMPT, setNotice);
           setSlidesHtml(slides);
           setEditSelectedSlides([]);
           setMessages([...newHistory, {
