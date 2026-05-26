@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, MessageCircle, Plus, Search, Send, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, Plus, Search, Send, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
 type SessionSummary = { id: string; title: string };
 
-export function ChatPanel() {
+export function ChatPanel({ onSwitchMode }: { onSwitchMode?: () => void }) {
   // Session management
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
@@ -453,7 +453,7 @@ export function ChatPanel() {
               </div>
             ) : null}
 
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "stretch" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 8, alignItems: "stretch" }}>
               <div style={{ position: "relative" }} ref={filePickerRef}>
                 <Button
                   variant="secondary"
@@ -577,6 +577,17 @@ export function ChatPanel() {
                 <Send size={18} aria-hidden="true" />
                 送信
               </Button>
+              {onSwitchMode ? (
+                <button
+                  type="button"
+                  onClick={onSwitchMode}
+                  title="マニュアル作成モード"
+                  style={{ width: 44, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 10, letterSpacing: "0.1em", fontWeight: 500 }}
+                >
+                  <FileText size={16} aria-hidden="true" />
+                  <span>作成</span>
+                </button>
+              ) : null}
             </div>
             <div className="tiny soft" style={{ marginTop: 8, letterSpacing: "0.06em" }}>
               ⌘ + Enter で送信
