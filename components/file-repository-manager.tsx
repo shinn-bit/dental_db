@@ -32,7 +32,7 @@ type RepositoryFile = {
   textExtractionStatus: StoredFileMetadata["textExtractionStatus"];
 };
 
-type DetailDraft = { tags: string; version: string; memo: string };
+type DetailDraft = { catId: string; subId: string; memo: string };
 
 // ── Default library ─────────────────────────────────────────────
 const DEFAULT_LIBRARY: LibraryCategory[] = [
@@ -86,15 +86,11 @@ export function FileRepositoryManager() {
   const [files, setFiles] = useState<RepositoryFile[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [tags, setTags] = useState("");
-  const [version, setVersion] = useState("");
   const [memo, setMemo] = useState("");
   const [notice, setNotice] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [isLoadingFiles, setIsLoadingFiles] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [syncStatus, setSyncStatus] = useState("");
-  const [syncing, setSyncing] = useState(false);
   const [selectedDetail, setSelectedDetail] = useState<RepositoryFile | null>(null);
   const [detailDraft, setDetailDraft] = useState<DetailDraft | null>(null);
   const [detailSaving, setDetailSaving] = useState(false);
@@ -228,7 +224,6 @@ export function FileRepositoryManager() {
 
   async function registerFiles() {
     if (!pendingFiles.length) { setNotice("ファイルを選択してください。"); return; }
-    const tagList = tags.split(",").map((t) => t.trim()).filter(Boolean);
     setIsUploading(true);
     setNotice("S3へアップロードしています。");
     try {
@@ -255,7 +250,7 @@ export function FileRepositoryManager() {
             contentType: file.type || "application/octet-stream",
             size: file.size, sizeLabel: formatFileSize(file.size),
             thumbnailLabel: getThumbnailLabel(file.name),
-            tags: tagList, version: version.trim(), memo: memo.trim(),
+            memo: memo.trim(),
             uploadedAt: new Date().toISOString()
           })
         });
@@ -270,7 +265,7 @@ export function FileRepositoryManager() {
       }
       setFiles((cur) => [...uploaded, ...cur]);
       setPendingFiles([]);
-      setTags(""); setVersion(""); setMemo("");
+      setMemo("");
       setNotice(`${uploaded.length}件を資料庫に追加しました。`);
     } catch {
       setNotice("アップロードに失敗しました。SSO期限やS3設定を確認してください。");
@@ -360,24 +355,14 @@ export function FileRepositoryManager() {
     }
   }
 
-  async function startSync() {
-    setSyncing(true);
-    setSyncStatus("AI同期を開始しています。");
-    try {
-      const res = await fetch("/api/sync", { method: "POST" });
-      if (!res.ok) throw new Error("Failed to start sync");
-      const data = (await res.json()) as { job?: { ingestionJobId?: string } };
-      setSyncStatus(`同期ジョブを開始しました。${data.job?.ingestionJobId || ""}`.trim());
-    } catch {
-      setSyncStatus("AI同期の開始に失敗しました。Bedrock設定やSSO期限を確認してください。");
-    } finally {
-      setSyncing(false);
-    }
-  }
-
   function openDetail(file: RepositoryFile) {
+    const a = assignments[file.id];
     setSelectedDetail(file);
-    setDetailDraft({ tags: file.tags.join(", "), version: file.version, memo: file.memo });
+    setDetailDraft({
+      catId: a?.catId ?? library[0]?.id ?? "",
+      subId: a?.subId ?? library[0]?.subs[0]?.id ?? "",
+      memo: file.memo
+    });
   }
 
   async function saveDetail() {
@@ -387,17 +372,14 @@ export function FileRepositoryManager() {
       const res = await fetch(`/api/files/${selectedDetail.id}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tags: detailDraft.tags.split(",").map((t) => t.trim()).filter(Boolean),
-          version: detailDraft.version.trim(),
-          memo: detailDraft.memo.trim()
-        })
+        body: JSON.stringify({ memo: detailDraft.memo.trim() })
       });
       const data = (await res.json()) as { file?: StoredFileMetadata; error?: string };
       if (!res.ok || !data.file) throw new Error(data.error || "詳細を保存できませんでした。");
       const nextFile = toRepositoryFile(data.file);
       setFiles((cur) => cur.map((f) => f.id === nextFile.id ? nextFile : f));
       setSelectedDetail(nextFile);
+      if (detailDraft.catId) moveFile(selectedDetail.id, detailDraft.catId, detailDraft.subId || null);
       setNotice("詳細を保存しました。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "詳細を保存できませんでした。");
@@ -513,18 +495,8 @@ export function FileRepositoryManager() {
 
             <div className="divider" />
 
-            <FieldLabel>タグ（任意）</FieldLabel>
-            <input className="input" placeholder="カンマで区切って入力" value={tags} onChange={(e) => setTags(e.target.value)} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
-              <div>
-                <FieldLabel>版数</FieldLabel>
-                <input className="input" placeholder="v1.0" value={version} onChange={(e) => setVersion(e.target.value)} />
-              </div>
-              <div>
-                <FieldLabel>メモ</FieldLabel>
-                <input className="input" placeholder="任意" value={memo} onChange={(e) => setMemo(e.target.value)} />
-              </div>
-            </div>
+            <FieldLabel>メモ（任意）</FieldLabel>
+            <input className="input" placeholder="任意" value={memo} onChange={(e) => setMemo(e.target.value)} />
 
             {notice ? <p className="tag accent" style={{ marginTop: 14, display: "block" }}>{notice}</p> : null}
             <Button style={{ width: "100%", marginTop: 20, height: 44 }} onClick={registerFiles} disabled={isUploading}>
@@ -636,7 +608,7 @@ export function FileRepositoryManager() {
 
       {/* ── Overlays ── */}
       {selectedDetail && detailDraft ? (
-        <DetailOverlay file={selectedDetail} draft={detailDraft} saving={detailSaving} onDraft={setDetailDraft} onSave={saveDetail} onOpenSource={() => setSourceViewerFile(selectedDetail)} onClose={() => setSelectedDetail(null)} />
+        <DetailOverlay file={selectedDetail} draft={detailDraft} saving={detailSaving} library={library} onDraft={setDetailDraft} onSave={saveDetail} onOpenSource={() => setSourceViewerFile(selectedDetail)} onClose={() => setSelectedDetail(null)} />
       ) : null}
       {sourceViewerFile ? (
         <SourceViewerOverlay file={sourceViewerFile} onClose={() => setSourceViewerFile(null)} />
@@ -1260,9 +1232,10 @@ function FilePreview({ file }: { file: RepositoryFile }) {
   );
 }
 
-// ── Overlays (unchanged) ────────────────────────────────────────
-function DetailOverlay({ file, draft, saving, onDraft, onSave, onOpenSource, onClose }: {
+// ── Overlays ────────────────────────────────────────────────────
+function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSource, onClose }: {
   file: RepositoryFile; draft: DetailDraft; saving: boolean;
+  library: LibraryCategory[];
   onDraft: React.Dispatch<React.SetStateAction<DetailDraft | null>>;
   onSave: () => void; onOpenSource: () => void; onClose: () => void;
 }) {
@@ -1272,6 +1245,13 @@ function DetailOverlay({ file, draft, saving, onDraft, onSave, onOpenSource, onC
     document.body.style.overflow = "hidden";
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [onClose]);
+
+  const selectedCat = library.find((c) => c.id === draft.catId);
+
+  function handleCatChange(catId: string) {
+    const cat = library.find((c) => c.id === catId);
+    onDraft((cur) => cur ? { ...cur, catId, subId: cat?.subs[0]?.id ?? "" } : cur);
+  }
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -1289,15 +1269,21 @@ function DetailOverlay({ file, draft, saving, onDraft, onSave, onOpenSource, onC
           <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
             <Button variant="secondary" size="sm" onClick={onOpenSource}>原本を見る</Button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-            <div>
-              <FieldLabel>タグ</FieldLabel>
-              <input className="input" value={draft.tags} placeholder="カンマで区切って入力" onChange={(e) => onDraft((cur) => cur ? { ...cur, tags: e.target.value } : cur)} />
-            </div>
-            <div>
-              <FieldLabel>版数</FieldLabel>
-              <input className="input" value={draft.version} placeholder="v1.0" onChange={(e) => onDraft((cur) => cur ? { ...cur, version: e.target.value } : cur)} />
-            </div>
+          <FieldLabel>保存先フォルダー</FieldLabel>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <FolderSelect
+              value={draft.catId}
+              onChange={handleCatChange}
+              options={library.map((c) => ({ id: c.id, label: c.label }))}
+              placeholder="カテゴリーを選択"
+            />
+            <FolderSelect
+              value={draft.subId}
+              onChange={(subId) => onDraft((cur) => cur ? { ...cur, subId } : cur)}
+              options={(selectedCat?.subs || []).map((s) => ({ id: s.id, label: s.label }))}
+              placeholder="フォルダーを選択"
+              disabled={!selectedCat || (selectedCat.subs || []).length === 0}
+            />
           </div>
           <div style={{ marginTop: 16 }}>
             <FieldLabel>メモ</FieldLabel>
