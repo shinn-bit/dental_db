@@ -5,7 +5,7 @@ import { appEnv } from "@/lib/env";
 import { getS3Text, putS3Text, parseS3Json } from "@/lib/s3-json";
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
-type ChatSession = { id: string; title: string; bedrockSessionId: string; messages: ChatMessage[] };
+type ChatSession = { id: string; title: string; bedrockSessionId: string; messages: ChatMessage[]; type?: "chat" | "manual" };
 type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
 
 const BUCKET = appEnv.s3BucketName;
@@ -44,8 +44,9 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     const existing = index.findIndex((s) => s.id === id);
     if (existing >= 0) {
       index[existing].title = session.title;
+      if (session.type) index[existing].type = session.type;
     } else {
-      index.unshift({ id, title: session.title });
+      index.unshift({ id, title: session.title, ...(session.type ? { type: session.type } : {}) });
     }
     await writeIndex(index);
     return NextResponse.json({ ok: true });
