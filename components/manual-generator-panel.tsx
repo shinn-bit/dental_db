@@ -160,7 +160,19 @@ async function generateSingleSlideStreaming(
   return match ? match[0] : accumulated.trim();
 }
 
-// ── Slide iframe builder ──────────────────────────────────────────────────────
+// ── Slide helpers ─────────────────────────────────────────────────────────────
+
+function injectEmbeddedImages(
+  html: string,
+  imageMap: Map<number, { base64: string; mimeType: string }>
+): string {
+  if (imageMap.size === 0) return html;
+  return html.replace(/<div[^>]*data-image="(\d+)"[^>]*><\/div>/gi, (_, n) => {
+    const img = imageMap.get(Number(n));
+    if (!img) return "";
+    return `<img src="data:${img.mimeType};base64,${img.base64}" style="max-width:100%;max-height:100%;object-fit:contain;display:block;" />`;
+  });
+}
 
 function buildSlideIframeHtml(slides: string[], slideTheme: string): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -217,7 +229,7 @@ const SLIDE_SYS_PROMPT = [
   "【出力形式】各スライドを ===SLIDE_N===（N=1〜12）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。",
   "画像の取り扱い:",
   "- 参考画像: 内容生成の参考としてください",
-  "- 埋め込み画像IMAGE_N: 指定された場所に <div data-image=\"N\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入してください",
+  "- 埋め込み画像IMAGE_N: NをそのままINDEXに使い <div data-image=\"INDEX\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入する。例: IMAGE_0 → data-image=\"0\"、IMAGE_1 → data-image=\"1\"",
   "",
   "【各スライドの仕様】",
   ...SLIDE_SPEC_LINES,
@@ -292,11 +304,6 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const embedCounterRef = useRef(0);
 
-  const slideIframeSrc = useMemo(
-    () => slidesHtml.length ? buildSlideIframeHtml(slidesHtml, generatedTheme) : "",
-    [slidesHtml, generatedTheme]
-  );
-
   // 埋め込み画像マップ: imageIndex → data URI（プレビューとDOCX共通で使用）
   const embeddedImageMap = useMemo(() => {
     const map = new Map<number, { base64: string; mimeType: string }>();
@@ -309,7 +316,7 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
     return map;
   }, [messages]);
 
-  // プレビュー用: [IMAGE_N] を markdown 画像構文に変換
+  // Word プレビュー用: [IMAGE_N] を markdown 画像構文に変換
   const displayContent = useMemo(() => {
     if (!content || embeddedImageMap.size === 0) return content;
     return content.replace(/\[IMAGE_(\d+)\]/g, (_, n) => {
@@ -318,6 +325,13 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
       return `![埋め込み画像${n}](data:${img.mimeType};base64,${img.base64})`;
     });
   }, [content, embeddedImageMap]);
+
+  // スライドプレビュー用: data-image プレースホルダーを実画像に置換
+  const slideIframeSrc = useMemo(() => {
+    if (!slidesHtml.length) return "";
+    const processed = slidesHtml.map(html => injectEmbeddedImages(html, embeddedImageMap));
+    return buildSlideIframeHtml(processed, generatedTheme);
+  }, [slidesHtml, generatedTheme, embeddedImageMap]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -547,7 +561,6 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
       }
       const { toPng } = await import("html-to-image");
       const { default: pptxgen } = await import("pptxgenjs");
-      const embeddedImages = getEmbeddedImages();
 
       const container = document.createElement("div");
       container.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:960px;overflow:hidden;";
@@ -567,13 +580,7 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
         setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} このタブから離れないでください`);
 
         // data-image プレースホルダーを実画像に置換してからレンダリング
-        let slideHtml = slidesHtml[i];
-        embeddedImages.forEach(img => {
-          const re = new RegExp(`<div[^>]*data-image="${img.imageIndex}"[^>]*></div>`, "gi");
-          slideHtml = slideHtml.replace(re,
-            `<img src="data:${img.mimeType};base64,${img.base64}" style="max-width:100%;max-height:100%;object-fit:contain;" />`
-          );
-        });
+        const slideHtml = injectEmbeddedImages(slidesHtml[i], embeddedImageMap);
 
         container.innerHTML = slideHtml;
         const el = container.firstElementChild as HTMLElement | null;
