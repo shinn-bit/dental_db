@@ -297,6 +297,28 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
     [slidesHtml, generatedTheme]
   );
 
+  // 埋め込み画像マップ: imageIndex → data URI（プレビューとDOCX共通で使用）
+  const embeddedImageMap = useMemo(() => {
+    const map = new Map<number, { base64: string; mimeType: string }>();
+    messages.forEach(msg =>
+      (msg.images ?? []).forEach(img => {
+        if (img.mode === "embed" && img.imageIndex !== undefined)
+          map.set(img.imageIndex, { base64: img.base64, mimeType: img.mimeType });
+      })
+    );
+    return map;
+  }, [messages]);
+
+  // プレビュー用: [IMAGE_N] を markdown 画像構文に変換
+  const displayContent = useMemo(() => {
+    if (!content || embeddedImageMap.size === 0) return content;
+    return content.replace(/\[IMAGE_(\d+)\]/g, (_, n) => {
+      const img = embeddedImageMap.get(Number(n));
+      if (!img) return `[IMAGE_${n}]`;
+      return `![埋め込み画像${n}](data:${img.mimeType};base64,${img.base64})`;
+    });
+  }, [content, embeddedImageMap]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
@@ -369,14 +391,9 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
   }
 
   function getEmbeddedImages(): { imageIndex: number; base64: string; mimeType: string }[] {
-    const result: { imageIndex: number; base64: string; mimeType: string }[] = [];
-    messages.forEach(msg =>
-      (msg.images ?? []).forEach(img => {
-        if (img.mode === "embed" && img.imageIndex !== undefined)
-          result.push({ imageIndex: img.imageIndex, base64: img.base64, mimeType: img.mimeType });
-      })
-    );
-    return result;
+    return Array.from(embeddedImageMap.entries()).map(([imageIndex, img]) => ({
+      imageIndex, base64: img.base64, mimeType: img.mimeType,
+    }));
   }
 
   // ── Send message ──────────────────────────────────────────────────────────
@@ -863,7 +880,7 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
                   </h1>
                 ) : null}
                 <div className="prose">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
                 </div>
               </>
             ) : (

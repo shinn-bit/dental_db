@@ -28,21 +28,20 @@ export async function POST(request: Request) {
   }
 
   try {
-    const bodyHtml = await marked(content, { gfm: true, breaks: false });
-
     // Build a map from imageIndex → data URI for fast lookup
     const imageMap = new Map<number, string>(
       images.map(img => [img.imageIndex, `data:${img.mimeType};base64,${img.base64}`])
     );
 
-    // Replace [IMAGE_N] markers with <img> tags
-    const bodyWithImages = bodyHtml.replace(/\[IMAGE_(\d+)\]/g, (_match, n) => {
+    // Replace [IMAGE_N] markers BEFORE marked so it generates proper <img> tags
+    const markdownWithImages = content.replace(/\[IMAGE_(\d+)\]/g, (_match, n) => {
       const dataUri = imageMap.get(Number(n));
       if (!dataUri) return "";
-      return `<img src="${dataUri}" style="max-width:100%;height:auto;display:block;margin:8px 0;" alt="IMAGE_${n}" />`;
+      return `\n\n![IMAGE_${n}](${dataUri})\n\n`;
     });
 
-    const fullHtml = `<h1>${escapeHtml(theme)}</h1>${bodyWithImages}`;
+    const bodyHtml = await marked(markdownWithImages, { gfm: true, breaks: false });
+    const fullHtml = `<h1>${escapeHtml(theme)}</h1>${bodyHtml}`;
 
     const docxBuffer = await HTMLtoDOCX(fullHtml, null, {
       title: theme,
