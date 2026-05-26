@@ -22,8 +22,26 @@ type ManualImagePart = {
   base64: string;
   previewUrl: string;
   mode: ImageMode;
-  imageIndex?: number;   // embed のみ: IMAGE_N の N
-  placement?: string;    // embed + user指定のみ: 配置場所テキスト
+  imageIndex?: number;
+  placement?: string;
+  storageKey: string;  // S3保存用UUID
+  s3Key?: string;      // S3アップロード完了後に設定
+};
+
+type ManualImageRefStored = {
+  mimeType: string; mode: ImageMode;
+  imageIndex?: number; placement?: string;
+  storageKey?: string; s3Key?: string;
+};
+type ManualMessageStored = {
+  role: "user" | "model"; text: string; displayText?: string;
+  images?: ManualImageRefStored[];
+};
+type ManualSession = {
+  id: string; title: string; type: "manual";
+  outputType: "word" | "slide"; generatedTheme: string;
+  content: string; slidesHtml: string[];
+  messages: ManualMessageStored[];
 };
 
 type ManualMessage = {
@@ -284,7 +302,10 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => void }) {
+export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
+  onSwitchMode?: () => void;
+  initialSessionId?: string | null;
+}) {
   const [messages, setMessages] = useState<ManualMessage[]>([]);
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ManualImagePart[]>([]);
@@ -303,6 +324,7 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const embedCounterRef = useRef(0);
+  const sessionIdRef = useRef<string>(initialSessionId ?? crypto.randomUUID());
 
   // 埋め込み画像マップ: imageIndex → data URI（プレビューとDOCX共通で使用）
   const embeddedImageMap = useMemo(() => {
@@ -382,11 +404,19 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
         uploadQueue.mode === "embed" && uploadQueue.placementMode === "user" && uploadQueue.placementText.trim()
           ? uploadQueue.placementText.trim()
           : undefined,
+      storageKey: crypto.randomUUID(),
     }));
 
     if (uploadQueue.mode === "embed") embedCounterRef.current += uploadQueue.rawFiles.length;
     setPendingImages(prev => [...prev, ...newImages]);
     setUploadQueue(null);
+
+    // S3へバックグラウンドアップロード
+    newImages.forEach(img => {
+      uploadImageToS3(img).then(s3Key => {
+        if (s3Key) updateImageS3Key(img.storageKey, s3Key);
+      });
+    });
   }
 
   function removeImage(idx: number) {
@@ -402,11 +432,128 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   function newManual() {
+    sessionIdRef.current = crypto.randomUUID();
     setMessages([]); setInput(""); setPendingImages([]); setUploadQueue(null);
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
     embedCounterRef.current = 0;
   }
+
+  // ── S3 image upload ──────────────────────────────────────────────────────
+
+  async function uploadImageToS3(img: ManualImagePart): Promise<string | null> {
+    try {
+      const { uploadUrl, s3Key } = await fetch("/api/manual-images", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "upload", sessionId: sessionIdRef.current, storageKey: img.storageKey, mimeType: img.mimeType }),
+      }).then(r => r.json()) as { uploadUrl: string; s3Key: string };
+      const blob = await fetch(`data:${img.mimeType};base64,${img.base64}`).then(r => r.blob());
+      await fetch(uploadUrl, { method: "PUT", body: blob, headers: { "Content-Type": img.mimeType } });
+      return s3Key;
+    } catch { return null; }
+  }
+
+  function updateImageS3Key(storageKey: string, s3Key: string) {
+    const updater = (imgs: ManualImagePart[]) =>
+      imgs.map(img => img.storageKey === storageKey ? { ...img, s3Key } : img);
+    setPendingImages(updater);
+    setMessages(prev => prev.map(msg => ({
+      ...msg,
+      images: msg.images ? updater(msg.images) : undefined,
+    })));
+  }
+
+  // ── Session persistence ──────────────────────────────────────────────────
+
+  function saveSession(opts: {
+    msgs: ManualMessage[]; body: string; slides: string[];
+    outType: "word" | "slide"; theme: string;
+  }) {
+    const id = sessionIdRef.current;
+    const title = opts.theme || opts.msgs.find(m => m.role === "user")?.text?.slice(0, 30) || "マニュアル";
+    const storedMsgs: ManualMessageStored[] = opts.msgs.map(msg => ({
+      role: msg.role, text: msg.text,
+      ...(msg.displayText ? { displayText: msg.displayText } : {}),
+      ...(msg.images?.length ? {
+        images: msg.images.map(({ mimeType, mode, imageIndex, placement, storageKey, s3Key }) => ({
+          mimeType, mode,
+          ...(imageIndex !== undefined ? { imageIndex } : {}),
+          ...(placement ? { placement } : {}),
+          ...(storageKey ? { storageKey } : {}),
+          ...(s3Key ? { s3Key } : {}),
+        }))
+      } : {}),
+    }));
+    const session: ManualSession = {
+      id, title, type: "manual",
+      outputType: opts.outType, generatedTheme: opts.theme,
+      content: opts.body, slidesHtml: opts.slides, messages: storedMsgs,
+    };
+    fetch(`/api/chat-sessions/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(session),
+    }).catch(console.error);
+  }
+
+  // ── Session load ─────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (!initialSessionId) return;
+    sessionIdRef.current = initialSessionId;
+    (async () => {
+      setLoading(true);
+      setNotice("読み込み中…");
+      try {
+        const res = await fetch(`/api/chat-sessions/${initialSessionId}`);
+        if (!res.ok) throw new Error("not found");
+        const session = await res.json() as ManualSession;
+        setContent(session.content ?? "");
+        setSlidesHtml(session.slidesHtml ?? []);
+        setGeneratedOutputType(session.outputType ?? "word");
+        setOutputType(session.outputType ?? "word");
+        setGeneratedTheme(session.generatedTheme ?? "");
+
+        const restoredMsgs: ManualMessage[] = await Promise.all(
+          (session.messages ?? []).map(async msg => {
+            if (!msg.images?.length) return msg as ManualMessage;
+            const images = await Promise.all(msg.images.map(async ref => {
+              const base = {
+                mimeType: ref.mimeType, mode: ref.mode,
+                imageIndex: ref.imageIndex, placement: ref.placement,
+                storageKey: ref.storageKey ?? crypto.randomUUID(),
+                s3Key: ref.s3Key,
+              };
+              if (!ref.s3Key) return { ...base, base64: "", previewUrl: "" } as ManualImagePart;
+              try {
+                const { url } = await fetch("/api/manual-images", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ action: "download", s3Key: ref.s3Key }),
+                }).then(r => r.json()) as { url: string };
+                const blob = await fetch(url).then(r => r.blob());
+                const base64 = await new Promise<string>(resolve => {
+                  const reader = new FileReader();
+                  reader.onload = () => resolve((reader.result as string).split(",")[1]);
+                  reader.readAsDataURL(blob);
+                });
+                return { ...base, base64, previewUrl: URL.createObjectURL(blob) } as ManualImagePart;
+              } catch { return { ...base, base64: "", previewUrl: "" } as ManualImagePart; }
+            }));
+            return { ...msg, images } as ManualMessage;
+          })
+        );
+        setMessages(restoredMsgs);
+        setNotice("");
+      } catch {
+        setNotice("セッションの読み込みに失敗しました");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialSessionId]);
 
   function getEmbeddedImages(): { imageIndex: number; base64: string; mimeType: string }[] {
     return Array.from(embeddedImageMap.entries()).map(([imageIndex, img]) => ({
@@ -479,44 +626,41 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
 
           const updated = [...slidesHtml];
           results.forEach(({ idx, html }) => { if (html) updated[idx] = html; });
+          const finalMsgs = [...newHistory, { role: "model" as const, text: `${targets.map(i => `${i + 1}枚目`).join("・")}を更新しました。` }];
           setSlidesHtml(updated);
           setEditSelectedSlides([]);
-          setMessages([...newHistory, {
-            role: "model",
-            text: `${targets.map(i => `${i + 1}枚目`).join("・")}を更新しました。`,
-          }]);
+          setMessages(finalMsgs);
           setNotice("");
+          saveSession({ msgs: finalMsgs, body: content, slides: updated, outType: currentOutputType, theme: generatedTheme });
         } else {
           // ── 全スライド生成（ストリーミング）──────────────────────────────
           setNotice("スライドを生成中…");
+          const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
           const slides = await generateSlidesStreaming(
             GEMINI_FLASH_MODEL,
             buildContents(augmentedText, pendingImages),
             SLIDE_SYS_PROMPT,
             setNotice
           );
+          const finalMsgs = [...newHistory, { role: "model" as const, text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` }];
           setSlidesHtml(slides);
           setEditSelectedSlides([]);
-          setMessages([...newHistory, {
-            role: "model",
-            text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。`,
-          }]);
+          setMessages(finalMsgs);
           setNotice("");
+          saveSession({ msgs: finalMsgs, body: "", slides, outType: currentOutputType, theme });
         }
       } else {
         // ── Word 文書生成 ─────────────────────────────────────────────────
-        // 編集時は現在のMarkdownをコンテキストとして渡す
+        const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
         const wordContents = buildContents(augmentedText, pendingImages, content || undefined);
         let accumulated = "";
         await streamGenerate(GEMINI_FLASH_MODEL, WORD_SYS_PROMPT, wordContents, chunk => {
           accumulated = chunk;
           setContent(chunk);
         });
-        setMessages([...newHistory, {
-          role: "model",
-          text: accumulated,
-          displayText: "✓ マニュアルを生成・更新しました。修正があればお知らせください。",
-        }]);
+        const finalMsgs = [...newHistory, { role: "model" as const, text: accumulated, displayText: "✓ マニュアルを生成・更新しました。修正があればお知らせください。" }];
+        setMessages(finalMsgs);
+        saveSession({ msgs: finalMsgs, body: accumulated, slides: [], outType: currentOutputType, theme });
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");

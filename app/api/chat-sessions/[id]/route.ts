@@ -6,7 +6,7 @@ import { getS3Text, putS3Text, parseS3Json } from "@/lib/s3-json";
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
 type ChatSession = { id: string; title: string; bedrockSessionId: string; messages: ChatMessage[] };
-type SessionSummary = { id: string; title: string };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
 
 const BUCKET = appEnv.s3BucketName;
 const INDEX_KEY = "chat-sessions/_index.json";
@@ -51,6 +51,29 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[chat-sessions PUT] failed:", err);
+    return NextResponse.json({ error: String(err) }, { status: 500 });
+  }
+}
+
+export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  try {
+    const { title } = await req.json() as { title: string };
+    const index = await readIndex();
+    const entry = index.find(s => s.id === id);
+    if (!entry) return NextResponse.json({ error: "not found" }, { status: 404 });
+    entry.title = title;
+    await writeIndex(index);
+    try {
+      const text = await getS3Text(BUCKET, `${PREFIX}${id}.json`);
+      if (text) {
+        const session = parseS3Json<Record<string, unknown>>(text);
+        session.title = title;
+        await putS3Text(BUCKET, `${PREFIX}${id}.json`, JSON.stringify(session), "application/json");
+      }
+    } catch {}
+    return NextResponse.json({ ok: true });
+  } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }

@@ -3,20 +3,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, Plus, Search, Send, Trash2, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, MoreHorizontal, Plus, Search, Send, Trash2, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
-type SessionSummary = { id: string; title: string };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
 
-export function ChatPanel({ onSwitchMode }: { onSwitchMode?: () => void }) {
+export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
+  onSwitchMode?: () => void;
+  onLoadManualSession?: (id: string) => void;
+}) {
   // Session management
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [bedrockSessionId, setBedrockSessionId] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
 
   // Chat
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -99,13 +105,17 @@ export function ChatPanel({ onSwitchMode }: { onSwitchMode?: () => void }) {
     setNotice("");
   }
 
-  async function loadSession(id: string) {
-    if (id === currentSessionId || loading) return;
+  async function loadSession(session: SessionSummary) {
+    if (session.type === "manual") {
+      onLoadManualSession?.(session.id);
+      return;
+    }
+    if (session.id === currentSessionId || loading) return;
     try {
-      const res = await fetch(`/api/chat-sessions/${id}`);
+      const res = await fetch(`/api/chat-sessions/${session.id}`);
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { messages?: ChatMessage[]; bedrockSessionId?: string };
-      setCurrentSessionId(id);
+      setCurrentSessionId(session.id);
       setMessages(data.messages ?? []);
       setBedrockSessionId(data.bedrockSessionId ?? "");
       setInput("");
@@ -124,6 +134,23 @@ export function ChatPanel({ onSwitchMode }: { onSwitchMode?: () => void }) {
       setNotice("削除に失敗しました。");
     }
     setDeleteConfirmId(null);
+    setMenuOpenId(null);
+  }
+
+  async function renameSession(id: string, title: string) {
+    if (!title.trim()) return;
+    try {
+      await fetch(`/api/chat-sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      setSessions(prev => prev.map(s => s.id === id ? { ...s, title: title.trim() } : s));
+    } catch {
+      setNotice("名前の変更に失敗しました。");
+    }
+    setEditingId(null);
+    setMenuOpenId(null);
   }
 
   async function sendMessage() {
@@ -291,60 +318,78 @@ export function ChatPanel({ onSwitchMode }: { onSwitchMode?: () => void }) {
                 sessions.map((session) => (
                   <div
                     key={session.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 2,
-                      padding: "6px 4px 6px 8px",
-                      borderRadius: 6,
-                      background:
-                        currentSessionId === session.id
-                          ? "var(--navy-tint-soft)"
-                          : "transparent",
-                      cursor: "pointer",
-                      marginBottom: 1,
-                    }}
-                    onClick={() => loadSession(session.id)}
+                    style={{ position: "relative", marginBottom: 1 }}
+                    onMouseLeave={() => { if (menuOpenId === session.id) setMenuOpenId(null); }}
                   >
-                    <span
-                      style={{
-                        flex: 1,
-                        fontSize: 12,
-                        color:
-                          currentSessionId === session.id
-                            ? "var(--navy)"
-                            : "var(--ink-soft)",
-                        fontWeight: currentSessionId === session.id ? 600 : 400,
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {session.title}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setDeleteConfirmId(session.id);
-                      }}
-                      title="削除"
-                      style={{
-                        width: 22,
-                        height: 22,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        border: "none",
-                        background: "transparent",
-                        cursor: "pointer",
-                        borderRadius: 4,
-                        color: "var(--ink-faint)",
-                        flexShrink: 0,
-                      }}
-                    >
-                      <Trash2 size={11} aria-hidden="true" />
-                    </button>
+                    {editingId === session.id ? (
+                      <input
+                        autoFocus
+                        value={editingTitle}
+                        onChange={e => setEditingTitle(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") renameSession(session.id, editingTitle);
+                          if (e.key === "Escape") { setEditingId(null); setMenuOpenId(null); }
+                        }}
+                        onBlur={() => renameSession(session.id, editingTitle)}
+                        style={{
+                          width: "100%", fontSize: 12, padding: "4px 6px",
+                          border: "1px solid var(--navy)", borderRadius: 4,
+                          outline: "none", background: "#fff",
+                        }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          display: "flex", alignItems: "center", gap: 4,
+                          padding: "6px 4px 6px 8px", borderRadius: 6,
+                          background: currentSessionId === session.id ? "var(--navy-tint-soft)" : "transparent",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => loadSession(session)}
+                      >
+                        {session.type === "manual"
+                          ? <Wrench size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                          : <MessageCircle size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                        }
+                        <span style={{
+                          flex: 1, fontSize: 12,
+                          color: currentSessionId === session.id ? "var(--navy)" : "var(--ink-soft)",
+                          fontWeight: currentSessionId === session.id ? 600 : 400,
+                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                        }}>
+                          {session.title}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                          style={{
+                            width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
+                            border: "none", background: "transparent", cursor: "pointer", borderRadius: 3,
+                            color: "var(--ink-faint)", flexShrink: 0,
+                          }}
+                        >
+                          <MoreHorizontal size={12} aria-hidden="true" />
+                        </button>
+                      </div>
+                    )}
+                    {menuOpenId === session.id && (
+                      <div style={{
+                        position: "absolute", right: 0, top: "100%", zIndex: 50,
+                        background: "#fff", border: "1px solid var(--line)", borderRadius: 6,
+                        boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 120, padding: "4px 0",
+                      }}>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setEditingId(session.id); setEditingTitle(session.title); setMenuOpenId(null); }}
+                          style={{ width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}
+                        >名前を変更</button>
+                        <button
+                          type="button"
+                          onClick={e => { e.stopPropagation(); setDeleteConfirmId(session.id); setMenuOpenId(null); }}
+                          style={{ width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "#c0392b" }}
+                        >削除</button>
+                      </div>
+                    )}
                   </div>
                 ))
               )}

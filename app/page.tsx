@@ -9,13 +9,22 @@ type Mode = "chat" | "manual";
 
 export default function Home() {
   const [mode, setMode] = useState<Mode>("chat");
+  const [pendingManualSessionId, setPendingManualSessionId] = useState<string | null>(null);
+
+  function handleLoadManualSession(id: string) {
+    setPendingManualSessionId(id);
+    setMode("manual");
+  }
 
   if (mode === "manual") {
     return (
       <>
         <PageHeading title="マニュアル作成" />
         <div style={{ flex: 1, display: "flex", alignItems: "stretch", minHeight: 0 }}>
-          <ManualGeneratorPanel onSwitchMode={() => setMode("chat")} />
+          <ManualGeneratorPanel
+            onSwitchMode={() => { setMode("chat"); setPendingManualSessionId(null); }}
+            initialSessionId={pendingManualSessionId}
+          />
         </div>
       </>
     );
@@ -25,7 +34,10 @@ export default function Home() {
     <>
       <PageHeading title="AIアシスタント" />
       <div style={{ flex: 1, display: "flex", alignItems: "stretch", minHeight: 0 }}>
-        <ChatPanel onSwitchMode={() => setMode("manual")} />
+        <ChatPanel
+          onSwitchMode={() => setMode("manual")}
+          onLoadManualSession={handleLoadManualSession}
+        />
       </div>
     </>
   );

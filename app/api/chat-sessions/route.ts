@@ -4,7 +4,7 @@ import { getS3Text, parseS3Json } from "@/lib/s3-json";
 
 export const dynamic = "force-dynamic";
 
-type SessionSummary = { id: string; title: string };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
 
 const BUCKET = appEnv.s3BucketName;
 const INDEX_KEY = "chat-sessions/_index.json";
