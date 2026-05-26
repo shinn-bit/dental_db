@@ -243,20 +243,18 @@ const SLIDE_EDIT_SYS_PROMPT = [
 
 // ── Gemini contents builder ───────────────────────────────────────────────────
 
-function toGeminiContents(
-  history: ManualMessage[],
+// 履歴なし・1ターン構成。編集時は docContext に現在のドキュメントを渡す。
+function buildContents(
   userText: string,
-  userImages: ManualImagePart[]
+  userImages: ManualImagePart[],
+  docContext?: string
 ): GeminiContent[] {
-  // 過去メッセージの inlineData は除外してテキストのみ送る（リクエストサイズ削減）
-  const contents: GeminiContent[] = history.map(msg => ({
-    role: msg.role,
-    parts: [{ text: msg.text || " " }],
-  }));
-  const newParts: GeminiPart[] = [{ text: userText || " " }];
-  userImages.forEach(img => newParts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } }));
-  contents.push({ role: "user", parts: newParts });
-  return contents;
+  const text = docContext
+    ? `【現在のコンテンツ】\n${docContext}\n\n【指示】\n${userText || " "}`
+    : (userText || " ");
+  const parts: GeminiPart[] = [{ text }];
+  userImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } }));
+  return [{ role: "user", parts }];
 }
 
 // ── Chip style ────────────────────────────────────────────────────────────────
@@ -420,8 +418,6 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
       });
     }
 
-    const contents = toGeminiContents(messages, augmentedText, pendingImages);
-
     try {
       if (currentOutputType === "slide") {
         const hasPartialSelection = slidesHtml.length > 0 && editSelectedSlides.length > 0;
@@ -441,8 +437,7 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
                 "",
                 "このスライドを修正指示に従って修正した1枚分の <div>...</div> を返してください。",
               ].join("\n");
-              const slideContents = toGeminiContents(messages, editPrompt, pendingImages);
-              return generateSingleSlideStreaming(GEMINI_FLASH_MODEL, slideContents, SLIDE_EDIT_SYS_PROMPT)
+              return generateSingleSlideStreaming(GEMINI_FLASH_MODEL, buildContents(editPrompt, pendingImages), SLIDE_EDIT_SYS_PROMPT)
                 .then(html => ({ idx, html }));
             })
           );
@@ -459,7 +454,12 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
         } else {
           // ── 全スライド生成（ストリーミング）──────────────────────────────
           setNotice("スライドを生成中…");
-          const slides = await generateSlidesStreaming(GEMINI_FLASH_MODEL, contents, SLIDE_SYS_PROMPT, setNotice);
+          const slides = await generateSlidesStreaming(
+            GEMINI_FLASH_MODEL,
+            buildContents(augmentedText, pendingImages),
+            SLIDE_SYS_PROMPT,
+            setNotice
+          );
           setSlidesHtml(slides);
           setEditSelectedSlides([]);
           setMessages([...newHistory, {
@@ -470,8 +470,10 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
         }
       } else {
         // ── Word 文書生成 ─────────────────────────────────────────────────
+        // 編集時は現在のMarkdownをコンテキストとして渡す
+        const wordContents = buildContents(augmentedText, pendingImages, content || undefined);
         let accumulated = "";
-        await streamGenerate(GEMINI_FLASH_MODEL, WORD_SYS_PROMPT, contents, chunk => {
+        await streamGenerate(GEMINI_FLASH_MODEL, WORD_SYS_PROMPT, wordContents, chunk => {
           accumulated = chunk;
           setContent(chunk);
         });
