@@ -10,6 +10,7 @@ type ChatRequest = {
   message?: string;
   files?: ChatSourceFile[];
   manuals?: ChatSourceFile[];
+  bedrockSessionId?: string;
 };
 
 type ChatSourceFile = {
@@ -59,6 +60,7 @@ export async function POST(request: Request) {
   try {
     const response = await createBedrockAgentRuntimeClient().send(
       new RetrieveAndGenerateCommand({
+        ...(body.bedrockSessionId ? { sessionId: body.bedrockSessionId } : {}),
         input: {
           text: queryText
         },
@@ -86,7 +88,8 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       answer: response.output?.text || "",
-      citations: response.citations || []
+      citations: response.citations || [],
+      bedrockSessionId: response.sessionId || ""
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown Bedrock error";
