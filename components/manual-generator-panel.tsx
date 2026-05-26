@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Download, ExternalLink, FileText, Search, Sparkles, X } from "lucide-react";
+import { Check, Download, ExternalLink, FileText, MessageSquare, Search, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 import { type StoredFileMetadata } from "@/lib/file-assets";
 
 const GEMINI_API_KEY        = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
 const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
+
+type EditHistoryItem = { instruction: string; targets: number[]; ok: boolean };
 
 async function streamGenerate(
   model: string,
@@ -109,7 +111,7 @@ async function generateSlideJson(
       let detail = errText;
       try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
       if (res.status === 503) {
-        throw new Error(`gemini-2.5-pro が混雑しています。しばらく待ってから再試行してください。`);
+        throw new Error(`gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。`);
       }
       throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
     }
@@ -122,7 +124,7 @@ async function generateSlideJson(
     return (parsed.slides ?? []).map(s => s.html ?? "").filter(Boolean);
   }
 
-  throw new Error(`gemini-2.5-pro が混雑しています。しばらく待ってから再試行してください。`);
+  throw new Error(`gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。`);
 }
 
 function buildSlideIframeHtml(slides: string[], slideTheme: string): string {
@@ -176,6 +178,24 @@ const MANUAL_SECTIONS = [
   "その他注意すべきこと"
 ];
 
+const SLIDE_SYS_PROMPT = [
+  "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
+  "歯科医院スタッフが直感的に理解できるプレゼンテーションを、HTML/CSS/SVGを駆使して生成します。",
+  "テキストを単純に並べるのではなく、フローチャート・比較表・グラフ・タイムラインなど、内容に応じた最適なビジュアルを積極的に採用してください。",
+].join("\n");
+
+const SLIDE_SPEC_LINES = [
+  "- サイズ: position:relative; overflow:hidden; width:960px; height:540px",
+  "- フォント: 'Noto Sans JP',sans-serif（ページで読込済み）、見出しに 'Noto Serif JP' も使用可",
+  "- スタイルはすべてstyle属性にインライン記述（classは使わない）",
+  "- 外部画像URL禁止。図・アイコンはSVGで描く",
+  "- カラー: ネイビー #0d2350/#1a3a6c、アクセント #5b9bd5/#4a7fc1、本文背景 #f7f9fc、テキスト #3d4a6b",
+  "- テキスト要素には必ず overflow:hidden を指定する",
+  "- 絶対配置の要素同士が重ならないよう top/left/width/height を厳密に計算する",
+  "- 見出し: font-size 20〜26px、本文・箇条書き: font-size 14〜17px",
+  "- 1スライドの情報量を絞る（箇条書き最大4項目、各項目25字以内）",
+  "- コンテンツ量が多い場合は font-size を小さくして収める（最小13px）",
+];
 
 export function ManualGeneratorPanel() {
   const [theme, setTheme] = useState("");
@@ -194,6 +214,14 @@ export function ManualGeneratorPanel() {
   const [content, setContent] = useState("");
   const [slidesHtml, setSlidesHtml] = useState<string[]>([]);
   const [generatedTheme, setGeneratedTheme] = useState("");
+
+  // Edit state
+  const [editInstruction, setEditInstruction] = useState("");
+  const [editSelectedSlides, setEditSelectedSlides] = useState<number[]>([]);
+  const [editLoading, setEditLoading] = useState(false);
+  const [editNotice, setEditNotice] = useState("");
+  const [editHistory, setEditHistory] = useState<EditHistoryItem[]>([]);
+  const editInputRef = useRef<HTMLInputElement | null>(null);
 
   const slideIframeSrc = useMemo(
     () => slidesHtml.length ? buildSlideIframeHtml(slidesHtml, generatedTheme) : "",
@@ -232,6 +260,12 @@ export function ManualGeneratorPanel() {
     setSelectedFileIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
   }
 
+  function toggleEditSlide(i: number) {
+    setEditSelectedSlides(cur =>
+      cur.includes(i) ? cur.filter(x => x !== i) : [...cur, i]
+    );
+  }
+
   async function generate() {
     if (!theme.trim() || loading) return;
     if (!GEMINI_API_KEY) {
@@ -244,6 +278,11 @@ export function ManualGeneratorPanel() {
     setContent("");
     setSlidesHtml([]);
     setGeneratedTheme("");
+    // reset edit state
+    setEditInstruction("");
+    setEditSelectedSlides([]);
+    setEditHistory([]);
+    setEditNotice("");
 
     const currentTheme = theme.trim();
 
@@ -268,31 +307,13 @@ export function ManualGeneratorPanel() {
         : "";
 
       if (isSlide) {
-        const slideSysPrompt = [
-          "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
-          "歯科医院スタッフが直感的に理解できるプレゼンテーションを、HTML/CSS/SVGを駆使して生成します。",
-          "テキストを単純に並べるのではなく、フローチャート・比較表・グラフ・タイムラインなど、内容に応じた最適なビジュアルを積極的に採用してください。",
-        ].join("\n");
-
         const slidePrompt = [
           `テーマ: ${currentTheme}`,
           "",
           "歯科医院スタッフ向けプレゼンテーション（12枚）のHTMLスライドを作成してください。",
           "",
           "【各スライドの仕様】",
-          "- サイズ: position:relative; overflow:hidden; width:960px; height:540px",
-          "- フォント: 'Noto Sans JP',sans-serif（ページで読込済み）、見出しに 'Noto Serif JP' も使用可",
-          "- スタイルはすべてstyle属性にインライン記述（classは使わない）",
-          "- 外部画像URL禁止。図・アイコンはSVGで描く",
-          "- カラー: ネイビー #0d2350/#1a3a6c、アクセント #5b9bd5/#4a7fc1、本文背景 #f7f9fc、テキスト #3d4a6b",
-          "",
-          "【レイアウト制約（必ず守ること）】",
-          "- すべての要素は width:960px, height:540px の範囲内に収める",
-          "- テキスト要素には必ず overflow:hidden を指定する",
-          "- 絶対配置の要素同士が重ならないよう top/left/width/height を厳密に計算する",
-          "- 見出し: font-size 20〜26px、本文・箇条書き: font-size 14〜17px",
-          "- 1スライドの情報量を絞る（箇条書き最大4項目、各項目25字以内）",
-          "- コンテンツ量が多い場合は font-size を小さくして収める（最小13px）",
+          ...SLIDE_SPEC_LINES,
           "",
           "【使えるビジュアル表現（自由に組み合わせてよい）】",
           "SVGフローチャート / SVGタイムライン / SVG棒グラフ・円グラフ / 2カラム比較レイアウト",
@@ -308,7 +329,7 @@ export function ManualGeneratorPanel() {
         ].filter(Boolean).join("\n");
 
         setNotice("gemini-2.5-flash でスライドを生成中…");
-        const slides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, slideSysPrompt);
+        const slides = await generateSlideJson(GEMINI_FLASH_MODEL, slidePrompt, SLIDE_SYS_PROMPT);
         setSlidesHtml(slides);
         setNotice("");
       } else {
@@ -333,6 +354,91 @@ export function ManualGeneratorPanel() {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function editSlides() {
+    if (!editInstruction.trim() || editLoading || !slidesHtml.length) return;
+
+    // 未選択 = 全スライド対象
+    const targets = editSelectedSlides.length === 0
+      ? slidesHtml.map((_, i) => i)
+      : [...editSelectedSlides].sort((a, b) => a - b);
+
+    const instruction = editInstruction.trim();
+    setEditLoading(true);
+    setEditNotice(`スライドを修正中… 0 / ${targets.length}`);
+
+    const sysPrompt = [
+      "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
+      "渡されたHTMLスライドを修正指示に従って修正し、1枚分の修正済みHTMLスライドを返してください。",
+      "【仕様（維持すること）】",
+      ...SLIDE_SPEC_LINES,
+    ].join("\n");
+
+    try {
+      const updated = [...slidesHtml];
+      for (let n = 0; n < targets.length; n++) {
+        const idx = targets[n];
+        setEditNotice(`スライドを修正中… ${n + 1} / ${targets.length} (${idx + 1}枚目)`);
+
+        const prompt = [
+          `【修正指示】`,
+          instruction,
+          ``,
+          `【${idx + 1}枚目のスライドHTML】`,
+          slidesHtml[idx],
+          ``,
+          `上記スライドを修正指示に従って修正した1枚分のHTMLを返してください。`,
+        ].join("\n");
+
+        const result = await generateSlideJson(GEMINI_FLASH_MODEL, prompt, sysPrompt);
+        if (result.length > 0) updated[idx] = result[0];
+      }
+
+      setSlidesHtml(updated);
+      setEditHistory(h => [...h, { instruction, targets, ok: true }]);
+      setEditInstruction("");
+      setEditNotice("");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "修正に失敗しました";
+      setEditNotice(msg);
+      setEditHistory(h => [...h, { instruction, targets, ok: false }]);
+    } finally {
+      setEditLoading(false);
+    }
+  }
+
+  async function editDocument() {
+    if (!editInstruction.trim() || editLoading || !content) return;
+
+    const instruction = editInstruction.trim();
+    setEditLoading(true);
+    setEditNotice("マニュアルを修正中…");
+
+    const sysPrompt = "あなたは歯科医院の院内マニュアル作成AIです。修正指示に従ってマニュアルを修正し、修正していない部分も含めた完全なマニュアルを出力してください。";
+    const prompt = [
+      `【修正指示】`,
+      instruction,
+      ``,
+      `【現在のマニュアル全文】`,
+      content,
+      ``,
+      `上記マニュアルを修正指示に従って修正し、完全なマニュアルを出力してください。`,
+    ].join("\n");
+
+    try {
+      setContent("");
+      setEditNotice("");
+      await streamGenerate(GEMINI_FLASH_MODEL, prompt, sysPrompt, setContent);
+      setEditHistory(h => [...h, { instruction, targets: [], ok: true }]);
+      setEditInstruction("");
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : "修正に失敗しました";
+      setEditNotice(msg);
+      setEditHistory(h => [...h, { instruction, targets: [], ok: false }]);
+    } finally {
+      setEditLoading(false);
     }
   }
 
@@ -392,7 +498,6 @@ export function ManualGeneratorPanel() {
       prs.layout = "LAYOUT_16x9";
 
       for (let i = 0; i < slidesHtml.length; i++) {
-        // タブが非アクティブな場合は再アクティブになるまで待つ
         if (document.visibilityState === "hidden") {
           setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} ⚠ このタブに戻ってください`);
           await new Promise<void>(resolve => {
@@ -432,6 +537,27 @@ export function ManualGeneratorPanel() {
       setNotice(error instanceof Error ? error.message : "PPTX 生成に失敗しました");
     }
   }
+
+  // ── スライド選択チップ ──────────────────────────────────────────
+  const slideChipStyle = (active: boolean): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: 28,
+    height: 28,
+    padding: "0 6px",
+    border: `1.5px solid ${active ? "var(--navy)" : "var(--line)"}`,
+    borderRadius: 6,
+    background: active ? "var(--navy)" : "transparent",
+    color: active ? "#fff" : "var(--ink-soft)",
+    fontSize: 12,
+    fontWeight: active ? 600 : 400,
+    cursor: "pointer",
+    flexShrink: 0,
+    transition: "all .12s ease",
+  });
+
+  const allSelected = editSelectedSlides.length === 0;
 
   return (
     <section className="panel" style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 200px)" }}>
@@ -543,6 +669,7 @@ export function ManualGeneratorPanel() {
 
         {(content || slidesHtml.length > 0 || loading) ? (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            {/* ── ヘッダーバー ── */}
             <div className="between" style={{ padding: "10px 24px", borderBottom: "1px solid var(--line-soft)", flexShrink: 0 }}>
               <span className="row" style={{ gap: 8, fontSize: 13 }}>
                 {loading
@@ -577,7 +704,7 @@ export function ManualGeneratorPanel() {
               ) : null}
             </div>
 
-            {/* スライドのインラインプレビュー */}
+            {/* ── スライドプレビュー ── */}
             {generatedOutputType === "slide" ? (
               !loading && slidesHtml.length > 0 ? (
                 <iframe
@@ -606,6 +733,131 @@ export function ManualGeneratorPanel() {
                 </div>
               </div>
             )}
+
+            {/* ── 編集パネル（生成完了後のみ表示） ── */}
+            {!loading && (slidesHtml.length > 0 || content) ? (
+              <div style={{ borderTop: "1px solid var(--line)", padding: "14px 24px 18px", flexShrink: 0, background: "var(--surface, #fafafa)" }}>
+                {/* パネルタイトル */}
+                <div className="row" style={{ gap: 6, marginBottom: 12 }}>
+                  <MessageSquare size={13} style={{ color: "var(--navy)" }} aria-hidden="true" />
+                  <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: "0.08em", color: "var(--ink-soft)" }}>
+                    編集指示
+                  </span>
+                </div>
+
+                {/* スライド選択チップ（スライドモードのみ） */}
+                {generatedOutputType === "slide" && slidesHtml.length > 0 ? (
+                  <div style={{ marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, color: "var(--ink-muted)", marginRight: 8 }}>対象:</span>
+                    <div style={{ display: "inline-flex", flexWrap: "wrap", gap: 4, verticalAlign: "middle" }}>
+                      {/* 全スライドボタン */}
+                      <button
+                        type="button"
+                        onClick={() => setEditSelectedSlides([])}
+                        style={slideChipStyle(allSelected)}
+                        title="全スライドを対象にする"
+                      >
+                        全て
+                      </button>
+                      {/* 個別スライドチップ */}
+                      {slidesHtml.map((_, i) => {
+                        const active = editSelectedSlides.includes(i);
+                        return (
+                          <button
+                            key={i}
+                            type="button"
+                            onClick={() => toggleEditSlide(i)}
+                            style={slideChipStyle(active)}
+                            title={`${i + 1}枚目を対象にする`}
+                          >
+                            {i + 1}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {!allSelected ? (
+                      <span style={{ marginLeft: 8, fontSize: 11, color: "var(--ink-muted)" }}>
+                        {editSelectedSlides.sort((a, b) => a - b).map(i => `${i + 1}枚目`).join("・")} を対象
+                      </span>
+                    ) : (
+                      <span style={{ marginLeft: 8, fontSize: 11, color: "var(--ink-muted)" }}>全スライドを対象</span>
+                    )}
+                  </div>
+                ) : null}
+
+                {/* 履歴（チャット風） */}
+                {editHistory.length > 0 ? (
+                  <div style={{ maxHeight: 130, overflowY: "auto", marginBottom: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                    {editHistory.map((h, idx) => (
+                      <div key={idx} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        {/* ユーザー発言 */}
+                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                          <span style={{ background: "var(--navy)", color: "#fff", borderRadius: "10px 10px 2px 10px", padding: "5px 10px", fontSize: 12, maxWidth: "80%" }}>
+                            {generatedOutputType === "slide" && h.targets.length > 0
+                              ? `[${h.targets.map(t => `${t + 1}枚目`).join("・")}] `
+                              : ""}
+                            {h.instruction}
+                          </span>
+                        </div>
+                        {/* AI応答 */}
+                        <div style={{ display: "flex", justifyContent: "flex-start" }}>
+                          <span style={{
+                            background: h.ok ? "#e8f4e8" : "#fde8e8",
+                            color: h.ok ? "#2d7a2d" : "#c0392b",
+                            borderRadius: "10px 10px 10px 2px",
+                            padding: "5px 10px",
+                            fontSize: 12,
+                          }}>
+                            {h.ok
+                              ? (generatedOutputType === "slide"
+                                ? `✓ ${h.targets.length === 0 ? "全スライド" : h.targets.map(t => `${t + 1}枚目`).join("・")}を更新しました`
+                                : "✓ マニュアルを更新しました")
+                              : `✗ 修正に失敗しました`}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {/* 入力フォーム */}
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    ref={editInputRef}
+                    className="input"
+                    placeholder={
+                      generatedOutputType === "slide"
+                        ? "例: フローチャートをシンプルにして、文字を大きくして"
+                        : "例: 第3節をもっと詳しく説明して、箇条書きを増やして"
+                    }
+                    value={editInstruction}
+                    onChange={(e) => setEditInstruction(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (generatedOutputType === "slide") editSlides();
+                        else editDocument();
+                      }
+                    }}
+                    disabled={editLoading}
+                    style={{ flex: 1, height: 38 }}
+                  />
+                  <Button
+                    onClick={generatedOutputType === "slide" ? editSlides : editDocument}
+                    disabled={!editInstruction.trim() || editLoading}
+                    style={{ gap: 5, height: 38, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}
+                  >
+                    {editLoading
+                      ? <><span className="dot ok" style={{ width: 8, height: 8, animation: "pulse 1.2s infinite" }} />修正中…</>
+                      : <><Send size={13} aria-hidden="true" />修正</>}
+                  </Button>
+                </div>
+
+                {editNotice ? (
+                  <p className="tag accent" style={{ marginTop: 8, alignSelf: "flex-start" }}>{editNotice}</p>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--ink-faint)", padding: 32 }}>
