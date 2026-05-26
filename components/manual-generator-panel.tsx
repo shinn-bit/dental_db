@@ -316,13 +316,17 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
     return map;
   }, [messages]);
 
-  // Word プレビュー用: [IMAGE_N] を markdown 画像構文に変換
-  const displayContent = useMemo(() => {
-    if (!content || embeddedImageMap.size === 0) return content;
-    return content.replace(/\[IMAGE_(\d+)\]/g, (_, n) => {
-      const img = embeddedImageMap.get(Number(n));
-      if (!img) return `[IMAGE_${n}]`;
-      return `![埋め込み画像${n}](data:${img.mimeType};base64,${img.base64})`;
+  // Word プレビュー用: [IMAGE_N] でコンテンツを分割して描画用データを作る
+  const wordPreviewParts = useMemo(() => {
+    if (!content) return [];
+    const segments = content.split(/\[IMAGE_(\d+)\]/);
+    return segments.map((seg, i) => {
+      if (i % 2 === 1) {
+        // キャプチャグループ = N の数値
+        const img = embeddedImageMap.get(Number(seg));
+        return { type: "image" as const, n: seg, img };
+      }
+      return { type: "text" as const, text: seg };
     });
   }, [content, embeddedImageMap]);
 
@@ -887,7 +891,20 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
                   </h1>
                 ) : null}
                 <div className="prose">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayContent}</ReactMarkdown>
+                  {wordPreviewParts.map((part, i) =>
+                    part.type === "image" ? (
+                      part.img ? (
+                        <img
+                          key={i}
+                          src={`data:${part.img.mimeType};base64,${part.img.base64}`}
+                          alt={`埋め込み画像${part.n}`}
+                          style={{ maxWidth: "100%", height: "auto", display: "block", margin: "12px 0" }}
+                        />
+                      ) : null
+                    ) : (
+                      <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+                    )
+                  )}
                 </div>
               </>
             ) : (
