@@ -445,6 +445,20 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
             <span className="panel-title">マニュアル作成</span>
           </div>
           <div className="row" style={{ gap: 6 }}>
+            {/* 出力形式トグル（最初のメッセージ前のみ切替可能） */}
+            <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+              {(["word", "slide"] as const).map(type => (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => { if (!loading && messages.length === 0) setOutputType(type); }}
+                  title={type === "word" ? "Word文書" : "スライド"}
+                  style={{ padding: "4px 10px", fontSize: 11, fontWeight: outputType === type ? 600 : 400, background: outputType === type ? "var(--navy)" : "transparent", color: outputType === type ? "#fff" : "var(--ink-soft)", border: 0, cursor: messages.length === 0 ? "pointer" : "default", opacity: messages.length > 0 && outputType !== type ? 0.4 : 1 }}
+                >
+                  {type === "word" ? "Word" : "Slides"}
+                </button>
+              ))}
+            </div>
             {/* 新規マニュアル */}
             <button
               type="button"
@@ -590,41 +604,11 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
       {/* ── 右: プレビュー ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div className="panel-head">
-          {/* 出力形式セレクター（生成前は選択可、生成後は表示のみ） */}
-          <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
-            {(["word", "slide"] as const).map(type => {
-              const isActive = (messages.length === 0 ? outputType : generatedOutputType) === type;
-              const canSwitch = messages.length === 0 && !loading;
-              return (
-                <button
-                  key={type}
-                  type="button"
-                  onClick={() => { if (canSwitch) setOutputType(type); }}
-                  title={type === "word" ? "Word文書として生成" : "PowerPointスライドとして生成"}
-                  style={{
-                    padding: "5px 14px",
-                    fontSize: 12,
-                    fontWeight: isActive ? 600 : 400,
-                    background: isActive ? "var(--navy)" : "transparent",
-                    color: isActive ? "#fff" : "var(--ink-soft)",
-                    border: 0,
-                    cursor: canSwitch ? "pointer" : "default",
-                    opacity: !canSwitch && !isActive ? 0.4 : 1,
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                  }}
-                >
-                  {type === "word" ? (
-                    <><FileText size={12} aria-hidden="true" />Word文書</>
-                  ) : (
-                    <><ExternalLink size={12} aria-hidden="true" />スライド</>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-
+          <span className="tiny soft">
+            {generatedOutputType === "slide"
+              ? slidesHtml.length > 0 ? `スライド ${slidesHtml.length} 枚` : "プレビュー"
+              : "プレビュー"}
+          </span>
           <div className="row" style={{ gap: 6 }}>
             {!loading && generatedOutputType === "word" && content ? (
               <Button
@@ -683,17 +667,10 @@ export function ManualGeneratorPanel({ onSwitchMode }: { onSwitchMode?: () => vo
                 </div>
               </>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 14, color: "var(--ink-faint)", padding: 32 }}>
-                {outputType === "word" ? (
-                  <FileText size={36} strokeWidth={1.2} aria-hidden="true" />
-                ) : (
-                  <ExternalLink size={36} strokeWidth={1.2} aria-hidden="true" />
-                )}
-                <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.9 }}>
-                  {outputType === "word"
-                    ? <>上で <strong style={{ color: "var(--navy)" }}>Word文書</strong> が選択されています<br />左のチャットでマニュアルの内容を指示してください</>
-                    : <>上で <strong style={{ color: "var(--navy)" }}>PowerPointスライド</strong> が選択されています<br />左のチャットでスライドの内容を指示してください</>
-                  }
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10, color: "var(--ink-faint)" }}>
+                <FileText size={32} strokeWidth={1.2} aria-hidden="true" />
+                <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.8 }}>
+                  左のチャットからマニュアルを作成します
                 </p>
               </div>
             )}
