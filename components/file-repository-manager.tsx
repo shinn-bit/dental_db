@@ -527,8 +527,6 @@ export function FileRepositoryManager() {
             </div>
 
             {notice ? <p className="tag accent" style={{ marginTop: 14, display: "block" }}>{notice}</p> : null}
-            {syncStatus ? <p className="tiny" style={{ marginTop: 8, color: "var(--navy-deep)" }}>{syncStatus}</p> : null}
-
             <Button style={{ width: "100%", marginTop: 20, height: 44 }} onClick={registerFiles} disabled={isUploading}>
               <Upload size={15} aria-hidden="true" />
               {pendingFiles.length > 0 ? `${pendingFiles.length}件を資料庫に追加` : "資料庫に追加"}
@@ -571,10 +569,6 @@ export function FileRepositoryManager() {
                   <Search size={14} style={{ position: "absolute", left: 12, top: 12, color: "var(--ink-muted)" }} aria-hidden="true" />
                   <input className="input" placeholder="資料庫全体から探す" value={libQuery} onChange={(e) => setLibQuery(e.target.value)} style={{ paddingLeft: 34, height: 38, width: 200 }} />
                 </div>
-                <Button variant="secondary" onClick={startSync} disabled={syncing}>
-                  <RefreshCw size={14} aria-hidden="true" />
-                  AIに覚えさせる
-                </Button>
               </div>
             </div>
           </div>
