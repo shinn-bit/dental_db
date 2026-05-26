@@ -560,7 +560,7 @@ export function ManualGeneratorPanel() {
   const allSelected = editSelectedSlides.length === 0;
 
   return (
-    <section className="panel" style={{ display: "flex", flexDirection: "column", minHeight: "calc(100vh - 200px)" }}>
+    <section className="panel" style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div className="panel-head">
         <div className="row" style={{ gap: 10 }}>
           <FileText size={16} style={{ color: "var(--navy)" }} aria-hidden="true" />

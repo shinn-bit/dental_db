@@ -194,7 +194,7 @@ export function ChatPanel() {
     <>
       <section
         className="panel"
-        style={{ display: "flex", flexDirection: "row", minHeight: "calc(100vh - 200px)" }}
+        style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}
       >
         {/* ── サイドバー ── */}
         <div
