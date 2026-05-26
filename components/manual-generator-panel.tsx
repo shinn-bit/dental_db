@@ -704,36 +704,6 @@ export function ManualGeneratorPanel() {
               ) : null}
             </div>
 
-            {/* ── スライドプレビュー ── */}
-            {generatedOutputType === "slide" ? (
-              !loading && slidesHtml.length > 0 ? (
-                <iframe
-                  key={slideIframeSrc.length}
-                  srcDoc={slideIframeSrc}
-                  style={{ flex: 1, width: "100%", border: "none", minHeight: "500px" }}
-                  title="スライドプレビュー"
-                />
-              ) : (
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--ink-faint)" }}>
-                  {loading ? (
-                    <>
-                      <span className="dot ok" style={{ width: 10, height: 10, animation: "pulse 1.2s infinite" }} />
-                      <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)", textAlign: "center" }}>{notice}</p>
-                    </>
-                  ) : null}
-                </div>
-              )
-            ) : (
-              <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
-                {generatedTheme ? (
-                  <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>{generatedTheme}</h1>
-                ) : null}
-                <div className="prose">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-                </div>
-              </div>
-            )}
-
             {/* ── 編集パネル（生成完了後のみ表示） ── */}
             {!loading && (slidesHtml.length > 0 || content) ? (
               <div style={{ borderTop: "1px solid var(--line)", padding: "14px 24px 18px", flexShrink: 0, background: "var(--surface, #fafafa)" }}>
@@ -858,6 +828,36 @@ export function ManualGeneratorPanel() {
                 ) : null}
               </div>
             ) : null}
+
+            {/* ── スライドプレビュー ── */}
+            {generatedOutputType === "slide" ? (
+              !loading && slidesHtml.length > 0 ? (
+                <iframe
+                  key={slideIframeSrc.length}
+                  srcDoc={slideIframeSrc}
+                  style={{ flex: 1, width: "100%", border: "none", minHeight: "500px" }}
+                  title="スライドプレビュー"
+                />
+              ) : (
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, color: "var(--ink-faint)" }}>
+                  {loading ? (
+                    <>
+                      <span className="dot ok" style={{ width: 10, height: 10, animation: "pulse 1.2s infinite" }} />
+                      <p style={{ margin: 0, fontSize: 13, color: "var(--ink-muted)", textAlign: "center" }}>{notice}</p>
+                    </>
+                  ) : null}
+                </div>
+              )
+            ) : (
+              <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+                {generatedTheme ? (
+                  <h1 style={{ fontFamily: "var(--serif)", fontSize: 18, fontWeight: 700, color: "var(--navy-deep)", marginBottom: 20, marginTop: 0 }}>{generatedTheme}</h1>
+                ) : null}
+                <div className="prose">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--ink-faint)", padding: 32 }}>
