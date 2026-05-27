@@ -44,11 +44,14 @@ type ManualSession = {
   messages: ManualMessageStored[];
 };
 
+type PendingDoc = { name: string; type: string; base64: string };
+
 type ManualMessage = {
   role: "user" | "model";
   text: string;
   displayText?: string;
   images?: ManualImagePart[];
+  docNames?: string[];
 };
 
 type UploadQueue = {
@@ -277,6 +280,7 @@ const SLIDE_EDIT_SYS_PROMPT = [
 function buildContents(
   userText: string,
   userImages: ManualImagePart[],
+  resolvedDocs?: { name: string; type: string; base64?: string; text?: string }[],
   docContext?: string
 ): GeminiContent[] {
   const text = docContext
@@ -284,6 +288,13 @@ function buildContents(
     : (userText || " ");
   const parts: GeminiPart[] = [{ text }];
   userImages.forEach(img => parts.push({ inlineData: { mimeType: img.mimeType, data: img.base64 } }));
+  resolvedDocs?.forEach(doc => {
+    if (doc.type === "application/pdf" && doc.base64) {
+      parts.push({ inlineData: { mimeType: "application/pdf", data: doc.base64 } });
+    } else if (doc.text) {
+      parts.push({ text: `\n[添付ファイル: ${doc.name}]\n${doc.text}` });
+    }
+  });
   return [{ role: "user", parts }];
 }
 
@@ -309,7 +320,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   const [messages, setMessages] = useState<ManualMessage[]>([]);
   const [input, setInput] = useState("");
   const [pendingImages, setPendingImages] = useState<ManualImagePart[]>([]);
+  const [pendingDocs, setPendingDocs] = useState<PendingDoc[]>([]);
   const [uploadQueue, setUploadQueue] = useState<UploadQueue | null>(null);
+  const [isDragOver, setIsDragOver] = useState(false);
 
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
@@ -321,7 +334,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   const [slidesHtml, setSlidesHtml] = useState<string[]>([]);
   const [generatedTheme, setGeneratedTheme] = useState("");
 
-  const imageInputRef = useRef<HTMLInputElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const embedCounterRef = useRef(0);
   const sessionIdRef = useRef<string>(initialSessionId ?? crypto.randomUUID());
@@ -365,28 +378,81 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
 
   // ── Image upload flow ─────────────────────────────────────────────────────
 
-  function handleImageAttach(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-    if (e.target) e.target.value = "";
-
-    const promises = files.map(file =>
-      new Promise<{ base64: string; previewUrl: string; mimeType: string }>(resolve => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          resolve({
+  function attachImages(imageFiles: File[]) {
+    if (imageFiles.length === 0) return;
+    Promise.all(
+      imageFiles.map(file =>
+        new Promise<{ base64: string; previewUrl: string; mimeType: string }>(resolve => {
+          const reader = new FileReader();
+          reader.onload = () => resolve({
             base64: (reader.result as string).split(",")[1],
             previewUrl: URL.createObjectURL(file),
             mimeType: file.type,
           });
-        };
-        reader.readAsDataURL(file);
-      })
-    );
-
-    Promise.all(promises).then(rawFiles => {
+          reader.readAsDataURL(file);
+        })
+      )
+    ).then(rawFiles => {
       setUploadQueue({ rawFiles, step: 1, mode: null, placementMode: null, placementText: "" });
     });
+  }
+
+  function handleFileAttach(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (e.target) e.target.value = "";
+    attachImages(files.filter(f => f.type.startsWith("image/")));
+    handleDocAttach(files.filter(f =>
+      f.type === "application/pdf" ||
+      f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ));
+  }
+
+  function handleDocAttach(files: File[]) {
+    if (files.length === 0) return;
+    Promise.all(
+      files.map(file =>
+        new Promise<PendingDoc>(resolve => {
+          const reader = new FileReader();
+          reader.onload = () => resolve({
+            name: file.name,
+            type: file.type,
+            base64: (reader.result as string).split(",")[1],
+          });
+          reader.readAsDataURL(file);
+        })
+      )
+    ).then(docs => setPendingDocs(prev => [...prev, ...docs]));
+  }
+
+  function removeDoc(idx: number) {
+    setPendingDocs(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsDragOver(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    const files = e.dataTransfer.files;
+    if (!files.length) return;
+
+    const imageFiles = Array.from(files).filter(f => f.type.startsWith("image/"));
+    const docFiles = Array.from(files).filter(f =>
+      f.type === "application/pdf" ||
+      f.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+
+    attachImages(imageFiles);
+    handleDocAttach(docFiles);
   }
 
   function confirmUpload() {
@@ -433,7 +499,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
 
   function newManual() {
     sessionIdRef.current = crypto.randomUUID();
-    setMessages([]); setInput(""); setPendingImages([]); setUploadQueue(null);
+    setMessages([]); setInput(""); setPendingImages([]); setPendingDocs([]); setUploadQueue(null);
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
     embedCounterRef.current = 0;
@@ -572,6 +638,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       role: "user",
       text,
       images: pendingImages.length > 0 ? pendingImages : undefined,
+      docNames: pendingDocs.length > 0 ? pendingDocs.map(d => d.name) : undefined,
     };
     const newHistory = [...messages, userMsg];
     setMessages(newHistory);
@@ -579,6 +646,27 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
     setPendingImages([]);
     setLoading(true);
     setNotice("");
+
+    // DOCX はサーバーでテキスト抽出、PDF はそのまま
+    const resolvedDocs = await Promise.all(
+      pendingDocs.map(async (doc) => {
+        if (doc.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+          try {
+            const res = await fetch("/api/extract-text", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ data: doc.base64, name: doc.name }),
+            });
+            const { text: extracted } = (await res.json()) as { text: string };
+            return { name: doc.name, type: doc.type, text: extracted };
+          } catch {
+            return { name: doc.name, type: doc.type, text: `(${doc.name}の読み取りに失敗しました)` };
+          }
+        }
+        return { name: doc.name, type: doc.type, base64: doc.base64 };
+      })
+    );
+    setPendingDocs([]);
 
     const isFirstMessage = messages.length === 0;
     const currentOutputType = isFirstMessage ? outputType : generatedOutputType;
@@ -619,7 +707,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
                 "",
                 "このスライドを修正指示に従って修正した1枚分の <div>...</div> を返してください。",
               ].join("\n");
-              return generateSingleSlideStreaming(GEMINI_FLASH_MODEL, buildContents(editPrompt, pendingImages), SLIDE_EDIT_SYS_PROMPT)
+              return generateSingleSlideStreaming(GEMINI_FLASH_MODEL, buildContents(editPrompt, pendingImages, resolvedDocs), SLIDE_EDIT_SYS_PROMPT)
                 .then(html => ({ idx, html }));
             })
           );
@@ -638,7 +726,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
           const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
           const slides = await generateSlidesStreaming(
             GEMINI_FLASH_MODEL,
-            buildContents(augmentedText, pendingImages),
+            buildContents(augmentedText, pendingImages, resolvedDocs),
             SLIDE_SYS_PROMPT,
             setNotice
           );
@@ -652,7 +740,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       } else {
         // ── Word 文書生成 ─────────────────────────────────────────────────
         const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
-        const wordContents = buildContents(augmentedText, pendingImages, content || undefined);
+        const wordContents = buildContents(augmentedText, pendingImages, resolvedDocs, content || undefined);
         let accumulated = "";
         await streamGenerate(GEMINI_FLASH_MODEL, WORD_SYS_PROMPT, wordContents, chunk => {
           accumulated = chunk;
@@ -759,7 +847,25 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       {/* ══════════════════════════════════════════════════════════════════════
           左パネル: 指示チャット
       ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ width: 420, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)" }}>
+      <div
+        style={{ width: 420, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", position: "relative" }}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+      >
+        {isDragOver ? (
+          <div style={{
+            position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none",
+            background: "rgba(44,82,130,0.06)",
+            border: "2px dashed var(--navy)",
+            borderRadius: "16px 0 0 16px",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}>
+            <span style={{ color: "var(--navy)", fontSize: 14, fontWeight: 600, letterSpacing: "0.08em" }}>
+              ここにドロップして添付
+            </span>
+          </div>
+        ) : null}
 
         {/* ヘッダー */}
         <div className="panel-head">
@@ -804,7 +910,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
               <Sparkles size={28} strokeWidth={1.2} aria-hidden="true" />
               <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.8 }}>
                 作成したいマニュアルを<br />自由に入力してください<br />
-                <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>画像の添付にも対応しています</span>
+                <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>画像・PDF・DOCXの添付にも対応しています</span>
               </p>
             </div>
           ) : (
@@ -822,6 +928,15 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
                                 {img.mode === "embed" ? `埋込 #${img.imageIndex}` : "参考"}
                               </span>
                             </div>
+                          ))}
+                        </div>
+                      ) : null}
+                      {msg.docNames && msg.docNames.length > 0 ? (
+                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          {msg.docNames.map((name, j) => (
+                            <span key={j} className="tag" style={{ fontSize: 11 }}>
+                              <span className="truncate" style={{ maxWidth: 160 }}>{name}</span>
+                            </span>
                           ))}
                         </div>
                       ) : null}
@@ -946,6 +1061,21 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
           </div>
         ) : null}
 
+        {/* ── 確定済みドキュメントチップ ── */}
+        {pendingDocs.length > 0 ? (
+          <div style={{ padding: "6px 12px 0", borderTop: "1px solid var(--line-soft)", display: "flex", gap: 6, flexWrap: "wrap", background: "var(--surface, #fafafa)" }}>
+            {pendingDocs.map((doc, i) => (
+              <span key={i} className="tag">
+                <span className="truncate" style={{ maxWidth: 160, fontSize: 11 }}>{doc.name}</span>
+                <button type="button" onClick={() => removeDoc(i)}
+                  style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0, marginLeft: 2, display: "inline-flex" }}>
+                  <X size={10} aria-hidden="true" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         {/* ── 確定済み画像サムネイル ── */}
         {pendingImages.length > 0 ? (
           <div style={{ padding: "8px 12px", borderTop: "1px solid var(--line-soft)", display: "flex", gap: 8, flexWrap: "wrap", background: "var(--surface, #fafafa)" }}>
@@ -967,12 +1097,12 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
         {/* ── 入力エリア ── */}
         <div style={{ padding: 12, borderTop: "1px solid var(--line)", background: "var(--panel-deep)", borderBottomLeftRadius: 16 }}>
           <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "stretch" }}>
-            <button type="button" onClick={() => imageInputRef.current?.click()} title="画像を添付"
+            <button type="button" onClick={() => fileInputRef.current?.click()} title="ファイルを添付（画像・PDF・DOCX）"
               style={{ width: 44, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 10, letterSpacing: "0.1em", fontWeight: 500 }}>
               <Plus size={16} aria-hidden="true" />
-              <span>画像</span>
+              <span>追加</span>
             </button>
-            <input type="file" accept="image/*" multiple hidden ref={imageInputRef} onChange={handleImageAttach} />
+            <input type="file" accept="image/*,.pdf,.docx" multiple hidden ref={fileInputRef} onChange={handleFileAttach} />
             <textarea className="textarea" rows={3} placeholder="マニュアル作成の指示を入力…" value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendMessage(); } }}
