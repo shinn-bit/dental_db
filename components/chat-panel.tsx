@@ -39,6 +39,20 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
 
   const filePickerRef = useRef<HTMLDivElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const LINE_HEIGHT = 22.4; // 14px * 1.6
+  const TEXTAREA_PADDING_V = 16; // 8px top + 8px bottom
+  const MAX_TEXTAREA_HEIGHT = Math.round(LINE_HEIGHT * 7 + TEXTAREA_PADDING_V);
+
+  function adjustTextareaHeight() {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    const next = Math.min(el.scrollHeight, MAX_TEXTAREA_HEIGHT);
+    el.style.height = `${next}px`;
+    el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
+  }
 
   const selectedRepositoryFiles = useMemo(
     () => repositoryFiles.filter((f) => selectedFileIds.includes(f.id)),
@@ -161,6 +175,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
     const withUser: ChatMessage[] = [...messages, { role: "user", text: message }];
     setMessages(withUser);
     setInput("");
+    setTimeout(adjustTextareaHeight, 0);
     setLoading(true);
     setNotice("");
 
@@ -473,7 +488,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
           <div
             style={{
               borderTop: "1px solid var(--line)",
-              padding: 18,
+              padding: "10px 14px",
               background: "var(--panel-deep)",
               borderBottomRightRadius: 16,
             }}
@@ -602,18 +617,19 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
               </div>
 
               <textarea
+                ref={textareaRef}
                 className="textarea"
-                rows={3}
+                rows={1}
                 placeholder="質問を入力"
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); adjustTextareaHeight(); }}
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                     e.preventDefault();
                     sendMessage();
                   }
                 }}
-                style={{ resize: "none" }}
+                style={{ resize: "none", minHeight: "unset", padding: "8px 14px", overflowY: "hidden" }}
               />
               <Button
                 onClick={sendMessage}
@@ -635,7 +651,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                 </button>
               ) : null}
             </div>
-            <div className="tiny soft" style={{ marginTop: 8, letterSpacing: "0.06em" }}>
+            <div className="tiny soft" style={{ marginTop: 4, letterSpacing: "0.06em" }}>
               ⌘ + Enter で送信
             </div>
           </div>
