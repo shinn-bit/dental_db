@@ -43,6 +43,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
 
   // Attachments
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isDragOver, setIsDragOver] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -74,6 +75,23 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
+
+  function handleDragOver(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(true);
+  }
+
+  function handleDragLeave(e: React.DragEvent) {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsDragOver(false);
+    }
+  }
+
+  function handleDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setIsDragOver(false);
+    addFiles(e.dataTransfer.files);
+  }
 
   function addFiles(fileList: FileList | null) {
     if (!fileList) return;
@@ -572,8 +590,24 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
 
         {/* ── チャットエリア ── */}
         <div
-          style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
+          style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, position: "relative" }}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
         >
+          {isDragOver ? (
+            <div style={{
+              position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none",
+              background: "rgba(44,82,130,0.06)",
+              border: "2px dashed var(--navy)",
+              borderRadius: 16,
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <span style={{ color: "var(--navy)", fontSize: 14, fontWeight: 600, letterSpacing: "0.08em" }}>
+                ここにドロップして添付
+              </span>
+            </div>
+          ) : null}
           <div className="panel-head">
             <div className="row" style={{ gap: 10 }}>
               <span className="panel-title">会話</span>
