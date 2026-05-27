@@ -1,14 +1,25 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, MoreHorizontal, Plus, Search, Send, Trash2, Wrench, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, MoreHorizontal, Paperclip, Plus, Send, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui";
-import { type StoredFileMetadata } from "@/lib/file-assets";
 
 type ChatMessage = { role: "user" | "assistant"; text: string };
 type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
+
+const ALLOWED_MIME_TYPES = [
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+];
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_FILES = 5;
 
 export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
   onSwitchMode?: () => void;
@@ -30,19 +41,16 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
 
-  // File picker
-  const [repositoryFiles, setRepositoryFiles] = useState<StoredFileMetadata[]>([]);
-  const [selectedFileIds, setSelectedFileIds] = useState<string[]>([]);
-  const [filePickerOpen, setFilePickerOpen] = useState(false);
-  const [fileQuery, setFileQuery] = useState("");
+  // Attachments
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
 
-  const filePickerRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const LINE_HEIGHT = 22.4; // 14px * 1.6
-  const TEXTAREA_PADDING_V = 16; // 8px top + 8px bottom
+  const LINE_HEIGHT = 22.4;
+  const TEXTAREA_PADDING_V = 16;
   const MAX_TEXTAREA_HEIGHT = Math.round(LINE_HEIGHT * 7 + TEXTAREA_PADDING_V);
 
   function adjustTextareaHeight() {
@@ -54,15 +62,6 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
     el.style.overflowY = el.scrollHeight > MAX_TEXTAREA_HEIGHT ? "auto" : "hidden";
   }
 
-  const selectedRepositoryFiles = useMemo(
-    () => repositoryFiles.filter((f) => selectedFileIds.includes(f.id)),
-    [repositoryFiles, selectedFileIds]
-  );
-  const filteredRepositoryFiles = useMemo(
-    () => repositoryFiles.filter((f) => f.fileName.toLowerCase().includes(fileQuery.toLowerCase())),
-    [fileQuery, repositoryFiles]
-  );
-
   // Load sessions list on mount
   useEffect(() => {
     fetch("/api/chat-sessions")
@@ -71,34 +70,43 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
       .catch(() => {});
   }, []);
 
-  // Load repository files
-  useEffect(() => {
-    let ignore = false;
-    fetch("/api/files", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((data: { files: StoredFileMetadata[] }) => { if (!ignore) setRepositoryFiles(data.files); })
-      .catch(() => {});
-    return () => { ignore = true; };
-  }, []);
-
-  // Close file picker on outside click
-  useEffect(() => {
-    function handlePointerDown(e: PointerEvent) {
-      if (filePickerRef.current && !filePickerRef.current.contains(e.target as Node)) {
-        setFilePickerOpen(false);
-      }
-    }
-    if (filePickerOpen) document.addEventListener("pointerdown", handlePointerDown);
-    return () => document.removeEventListener("pointerdown", handlePointerDown);
-  }, [filePickerOpen]);
-
   // Auto scroll to bottom on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  function toggleFile(id: string) {
-    setSelectedFileIds((cur) => cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]);
+  function addFiles(fileList: FileList | null) {
+    if (!fileList) return;
+    const errors: string[] = [];
+    const valid: File[] = [];
+
+    for (const file of Array.from(fileList)) {
+      if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+        errors.push(`${file.name}: 対応していないファイル形式です`);
+        continue;
+      }
+      if (file.size > MAX_FILE_SIZE) {
+        errors.push(`${file.name}: ファイルサイズが10MBを超えています`);
+        continue;
+      }
+      valid.push(file);
+    }
+
+    setAttachedFiles((prev) => {
+      const combined = [...prev, ...valid];
+      if (combined.length > MAX_FILES) {
+        errors.push(`添付できるファイルは${MAX_FILES}件までです`);
+        return combined.slice(0, MAX_FILES);
+      }
+      return combined;
+    });
+
+    if (errors.length > 0) setNotice(errors.join(" / "));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeFile(index: number) {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
   }
 
   async function copyMessage(text: string, index: number) {
@@ -117,6 +125,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
     setBedrockSessionId("");
     setInput("");
     setNotice("");
+    setAttachedFiles([]);
   }
 
   async function loadSession(session: SessionSummary) {
@@ -159,7 +168,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim() }),
       });
-      setSessions(prev => prev.map(s => s.id === id ? { ...s, title: title.trim() } : s));
+      setSessions((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, title: title.trim() } : s))
+      );
     } catch {
       setNotice("名前の変更に失敗しました。");
     }
@@ -167,48 +178,77 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
     setMenuOpenId(null);
   }
 
+  async function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        resolve(result.split(",")[1] ?? "");
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function sendMessage() {
     const message = input.trim();
     if (!message || loading) return;
 
+    const filesToSend = [...attachedFiles];
+    const displayText =
+      filesToSend.length > 0
+        ? `${message}\n[添付: ${filesToSend.map((f) => f.name).join(", ")}]`
+        : message;
+
     const prevMessages = messages;
-    const withUser: ChatMessage[] = [...messages, { role: "user", text: message }];
+    const withUser: ChatMessage[] = [
+      ...messages,
+      { role: "user", text: displayText },
+    ];
     setMessages(withUser);
     setInput("");
+    setAttachedFiles([]);
     setTimeout(adjustTextareaHeight, 0);
     setLoading(true);
     setNotice("");
 
     try {
+      const attachments = await Promise.all(
+        filesToSend.map(async (file) => ({
+          name: file.name,
+          type: file.type,
+          data: await fileToBase64(file),
+        }))
+      );
+
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
-          files: selectedRepositoryFiles.map((f) => ({
-            id: f.id,
-            fileName: f.fileName,
-            s3Key: f.s3Key,
-            summaryKey: f.summaryKey,
-            knowledgeBaseKey: f.knowledgeBaseKey,
-            extractedTextKey: f.extractedTextKey
-          })),
-          ...(bedrockSessionId ? { bedrockSessionId } : {})
-        })
+          ...(attachments.length > 0 ? { attachments } : {}),
+          ...(bedrockSessionId ? { bedrockSessionId } : {}),
+        }),
       });
-      const data = (await res.json()) as { answer?: string; error?: string; bedrockSessionId?: string };
+      const data = (await res.json()) as {
+        answer?: string;
+        error?: string;
+        bedrockSessionId?: string;
+      };
       if (!res.ok) throw new Error(data.error || "Failed to chat");
 
       const assistantText =
         data.answer?.trim() ||
         "資料庫から該当する内容を見つけられませんでした。資料の同期状態を確認してください。";
-      const allMessages: ChatMessage[] = [...withUser, { role: "assistant", text: assistantText }];
+      const allMessages: ChatMessage[] = [
+        ...withUser,
+        { role: "assistant", text: assistantText },
+      ];
       setMessages(allMessages);
 
       const newBedrockSessionId = data.bedrockSessionId ?? "";
       setBedrockSessionId(newBedrockSessionId);
 
-      // Persist to S3 (non-blocking but check for errors)
       const sessionId = currentSessionId ?? crypto.randomUUID();
       const title =
         sessions.find((s) => s.id === sessionId)?.title ?? message.slice(0, 30);
@@ -216,20 +256,32 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
       fetch(`/api/chat-sessions/${sessionId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: sessionId, title, bedrockSessionId: newBedrockSessionId, messages: allMessages })
-      }).then((res) => {
-        if (!res.ok) {
-          res.json().then((d: { error?: string }) => {
-            console.error("[chat save] PUT failed:", d.error);
-            setNotice("会話の保存に失敗しました。（管理者に連絡してください）");
-          }).catch(() => {
-            setNotice("会話の保存に失敗しました。");
-          });
-        }
-      }).catch((e) => {
-        console.error("[chat save] network error:", e);
-        setNotice("会話の保存に失敗しました（ネットワークエラー）。");
-      });
+        body: JSON.stringify({
+          id: sessionId,
+          title,
+          bedrockSessionId: newBedrockSessionId,
+          messages: allMessages,
+        }),
+      })
+        .then((res) => {
+          if (!res.ok) {
+            res
+              .json()
+              .then((d: { error?: string }) => {
+                console.error("[chat save] PUT failed:", d.error);
+                setNotice(
+                  "会話の保存に失敗しました。（管理者に連絡してください）"
+                );
+              })
+              .catch(() => {
+                setNotice("会話の保存に失敗しました。");
+              });
+          }
+        })
+        .catch((e) => {
+          console.error("[chat save] network error:", e);
+          setNotice("会話の保存に失敗しました（ネットワークエラー）。");
+        });
 
       if (!currentSessionId) {
         setCurrentSessionId(sessionId);
@@ -237,7 +289,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : "";
-      setNotice(msg ? `回答生成に失敗しました。${msg}` : "回答生成に失敗しました。");
+      setNotice(
+        msg ? `回答生成に失敗しました。${msg}` : "回答生成に失敗しました。"
+      );
       setMessages(prevMessages);
     } finally {
       setLoading(false);
@@ -293,7 +347,11 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                 flexShrink: 0,
               }}
             >
-              {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+              {sidebarOpen ? (
+                <ChevronLeft size={16} />
+              ) : (
+                <ChevronRight size={16} />
+              )}
             </button>
             {sidebarOpen ? (
               <button
@@ -326,7 +384,14 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
           {sidebarOpen ? (
             <div style={{ flex: 1, overflowY: "auto", padding: "6px 4px" }}>
               {sessions.length === 0 ? (
-                <p style={{ fontSize: 11, color: "var(--ink-muted)", padding: "12px 8px", margin: 0 }}>
+                <p
+                  style={{
+                    fontSize: 11,
+                    color: "var(--ink-muted)",
+                    padding: "12px 8px",
+                    margin: 0,
+                  }}
+                >
                   履歴なし
                 </p>
               ) : (
@@ -334,53 +399,106 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                   <div
                     key={session.id}
                     style={{ position: "relative", marginBottom: 1 }}
-                    onMouseLeave={() => { if (menuOpenId === session.id) setMenuOpenId(null); }}
+                    onMouseLeave={() => {
+                      if (menuOpenId === session.id) setMenuOpenId(null);
+                    }}
                   >
                     {editingId === session.id ? (
                       <input
                         autoFocus
                         value={editingTitle}
-                        onChange={e => setEditingTitle(e.target.value)}
-                        onKeyDown={e => {
-                          if (e.key === "Enter") renameSession(session.id, editingTitle);
-                          if (e.key === "Escape") { setEditingId(null); setMenuOpenId(null); }
+                        onChange={(e) => setEditingTitle(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter")
+                            renameSession(session.id, editingTitle);
+                          if (e.key === "Escape") {
+                            setEditingId(null);
+                            setMenuOpenId(null);
+                          }
                         }}
                         onBlur={() => renameSession(session.id, editingTitle)}
                         style={{
-                          width: "100%", fontSize: 12, padding: "4px 6px",
-                          border: "1px solid var(--navy)", borderRadius: 4,
-                          outline: "none", background: "#fff",
+                          width: "100%",
+                          fontSize: 12,
+                          padding: "4px 6px",
+                          border: "1px solid var(--navy)",
+                          borderRadius: 4,
+                          outline: "none",
+                          background: "#fff",
                         }}
                       />
                     ) : (
                       <div
                         style={{
-                          display: "flex", alignItems: "center", gap: 4,
-                          padding: "6px 4px 6px 8px", borderRadius: 6,
-                          background: currentSessionId === session.id ? "var(--navy-tint-soft)" : "transparent",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 4,
+                          padding: "6px 4px 6px 8px",
+                          borderRadius: 6,
+                          background:
+                            currentSessionId === session.id
+                              ? "var(--navy-tint-soft)"
+                              : "transparent",
                           cursor: "pointer",
                         }}
                         onClick={() => loadSession(session)}
                       >
-                        {session.type === "manual"
-                          ? <Wrench size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
-                          : <MessageCircle size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
-                        }
-                        <span style={{
-                          flex: 1, fontSize: 12,
-                          color: currentSessionId === session.id ? "var(--navy)" : "var(--ink-soft)",
-                          fontWeight: currentSessionId === session.id ? 600 : 400,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                        }}>
+                        {session.type === "manual" ? (
+                          <Wrench
+                            size={11}
+                            style={{
+                              flexShrink: 0,
+                              color: "var(--ink-faint)",
+                            }}
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <MessageCircle
+                            size={11}
+                            style={{
+                              flexShrink: 0,
+                              color: "var(--ink-faint)",
+                            }}
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span
+                          style={{
+                            flex: 1,
+                            fontSize: 12,
+                            color:
+                              currentSessionId === session.id
+                                ? "var(--navy)"
+                                : "var(--ink-soft)",
+                            fontWeight:
+                              currentSessionId === session.id ? 600 : 400,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
                           {session.title}
                         </span>
                         <button
                           type="button"
-                          onClick={e => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setMenuOpenId(
+                              menuOpenId === session.id ? null : session.id
+                            );
+                          }}
                           style={{
-                            width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center",
-                            border: "none", background: "transparent", cursor: "pointer", borderRadius: 3,
-                            color: "var(--ink-faint)", flexShrink: 0,
+                            width: 20,
+                            height: 20,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            borderRadius: 3,
+                            color: "var(--ink-faint)",
+                            flexShrink: 0,
                           }}
                         >
                           <MoreHorizontal size={12} aria-hidden="true" />
@@ -388,21 +506,61 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                       </div>
                     )}
                     {menuOpenId === session.id && (
-                      <div style={{
-                        position: "absolute", right: 0, top: "100%", zIndex: 50,
-                        background: "#fff", border: "1px solid var(--line)", borderRadius: 6,
-                        boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 120, padding: "4px 0",
-                      }}>
+                      <div
+                        style={{
+                          position: "absolute",
+                          right: 0,
+                          top: "100%",
+                          zIndex: 50,
+                          background: "#fff",
+                          border: "1px solid var(--line)",
+                          borderRadius: 6,
+                          boxShadow: "0 4px 12px rgba(0,0,0,.12)",
+                          minWidth: 120,
+                          padding: "4px 0",
+                        }}
+                      >
                         <button
                           type="button"
-                          onClick={e => { e.stopPropagation(); setEditingId(session.id); setEditingTitle(session.title); setMenuOpenId(null); }}
-                          style={{ width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}
-                        >名前を変更</button>
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingId(session.id);
+                            setEditingTitle(session.title);
+                            setMenuOpenId(null);
+                          }}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "6px 12px",
+                            fontSize: 12,
+                            border: "none",
+                            background: "none",
+                            cursor: "pointer",
+                            color: "var(--ink)",
+                          }}
+                        >
+                          名前を変更
+                        </button>
                         <button
                           type="button"
-                          onClick={e => { e.stopPropagation(); setDeleteConfirmId(session.id); setMenuOpenId(null); }}
-                          style={{ width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "#c0392b" }}
-                        >削除</button>
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeleteConfirmId(session.id);
+                            setMenuOpenId(null);
+                          }}
+                          style={{
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "6px 12px",
+                            fontSize: 12,
+                            border: "none",
+                            background: "none",
+                            cursor: "pointer",
+                            color: "#c0392b",
+                          }}
+                        >
+                          削除
+                        </button>
                       </div>
                     )}
                   </div>
@@ -413,7 +571,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
         </div>
 
         {/* ── チャットエリア ── */}
-        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <div
+          style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}
+        >
           <div className="panel-head">
             <div className="row" style={{ gap: 10 }}>
               <span className="panel-title">会話</span>
@@ -453,7 +613,14 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                 }}
               >
                 <MessageCircle size={32} strokeWidth={1.2} aria-hidden="true" />
-                <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.8 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 13,
+                    textAlign: "center",
+                    lineHeight: 1.8,
+                  }}
+                >
                   質問を入力してチャットを開始してください
                 </p>
               </div>
@@ -471,8 +638,14 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
               )
             )}
             {loading ? (
-              <div className="row" style={{ color: "var(--ink-muted)", fontSize: 13 }}>
-                <span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
+              <div
+                className="row"
+                style={{ color: "var(--ink-muted)", fontSize: 13 }}
+              >
+                <span
+                  className="dot ok"
+                  style={{ animation: "pulse 1.2s infinite" }}
+                />
                 資料から該当箇所を探しています…
               </div>
             ) : null}
@@ -493,19 +666,36 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
               borderBottomRightRadius: 16,
             }}
           >
-            {selectedRepositoryFiles.length > 0 ? (
-              <div className="row" style={{ flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
-                <span className="tiny soft" style={{ letterSpacing: "0.14em" }}>参照：</span>
-                {selectedRepositoryFiles.map((file) => (
-                  <span key={file.id} className="tag">
+            {/* 添付ファイルチップ */}
+            {attachedFiles.length > 0 ? (
+              <div
+                className="row"
+                style={{ flexWrap: "wrap", gap: 6, marginBottom: 10 }}
+              >
+                <span
+                  className="tiny soft"
+                  style={{ letterSpacing: "0.14em" }}
+                >
+                  添付：
+                </span>
+                {attachedFiles.map((file, i) => (
+                  <span key={i} className="tag">
                     <span className="truncate" style={{ maxWidth: 180 }}>
-                      {file.fileName.replace(/\.[^.]+$/, "")}
+                      {file.name}
                     </span>
                     <button
                       type="button"
-                      onClick={() => toggleFile(file.id)}
-                      style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0, marginLeft: 2, display: "inline-flex" }}
-                      title="この資料を外す"
+                      onClick={() => removeFile(i)}
+                      style={{
+                        background: "transparent",
+                        border: 0,
+                        color: "inherit",
+                        cursor: "pointer",
+                        padding: 0,
+                        marginLeft: 2,
+                        display: "inline-flex",
+                      }}
+                      title="添付を外す"
                     >
                       <X size={11} aria-hidden="true" />
                     </button>
@@ -514,107 +704,46 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
               </div>
             ) : null}
 
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto auto", gap: 8, alignItems: "stretch" }}>
-              <div style={{ position: "relative" }} ref={filePickerRef}>
-                <Button
-                  variant="secondary"
-                  onClick={() => setFilePickerOpen((cur) => !cur)}
-                  title="参照する資料を選ぶ"
-                  style={{ height: "100%", paddingLeft: 14, paddingRight: 14, flexDirection: "column", gap: 2 }}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "auto 1fr auto auto",
+                gap: 8,
+                alignItems: "stretch",
+              }}
+            >
+              {/* 添付ボタン */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.docx"
+                style={{ display: "none" }}
+                onChange={(e) => addFiles(e.target.files)}
+              />
+              <Button
+                variant="secondary"
+                onClick={() => fileInputRef.current?.click()}
+                title="ファイルを添付（画像・PDF・DOCX）"
+                style={{
+                  height: "100%",
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  flexDirection: "column",
+                  gap: 2,
+                }}
+              >
+                <Paperclip size={16} aria-hidden="true" />
+                <span
+                  style={{
+                    fontSize: 10,
+                    letterSpacing: "0.12em",
+                    fontWeight: 500,
+                  }}
                 >
-                  <Plus size={16} aria-hidden="true" />
-                  <span style={{ fontSize: 10, letterSpacing: "0.12em", fontWeight: 500 }}>資料を選ぶ</span>
-                </Button>
-                {filePickerOpen ? (
-                  <div
-                    style={{
-                      position: "absolute",
-                      bottom: "calc(100% + 8px)",
-                      left: 0,
-                      width: 360,
-                      maxWidth: "calc(100vw - 32px)",
-                      background: "#fff",
-                      border: "1px solid var(--line)",
-                      borderRadius: 12,
-                      boxShadow: "var(--shadow-lg)",
-                      padding: 14,
-                      zIndex: 20,
-                    }}
-                  >
-                    <div className="between" style={{ marginBottom: 10 }}>
-                      <span className="panel-title" style={{ fontSize: 13 }}>参照する資料</span>
-                      <button type="button" onClick={() => setFilePickerOpen(false)} className="btn ghost sm icon" title="閉じる">
-                        <X size={14} aria-hidden="true" />
-                      </button>
-                    </div>
-                    <div style={{ position: "relative", marginBottom: 10 }}>
-                      <Search size={14} style={{ position: "absolute", left: 12, top: 12, color: "var(--ink-muted)" }} aria-hidden="true" />
-                      <input
-                        className="input"
-                        placeholder="ファイル名で探す"
-                        style={{ paddingLeft: 34, height: 36 }}
-                        value={fileQuery}
-                        onChange={(e) => setFileQuery(e.target.value)}
-                      />
-                    </div>
-                    <div className="between" style={{ marginBottom: 8 }}>
-                      <span className="tiny soft">未選択の場合は院内すべての資料から探します</span>
-                      {selectedFileIds.length > 0 ? (
-                        <button type="button" onClick={() => setSelectedFileIds([])} className="btn ghost sm">
-                          すべて外す
-                        </button>
-                      ) : null}
-                    </div>
-                    <div style={{ maxHeight: 280, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                      {filteredRepositoryFiles.map((file) => {
-                        const selected = selectedFileIds.includes(file.id);
-                        return (
-                          <button
-                            key={file.id}
-                            type="button"
-                            onClick={() => toggleFile(file.id)}
-                            style={{
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 10,
-                              padding: "8px 10px",
-                              background: selected ? "var(--navy-tint-soft)" : "transparent",
-                              border: `1px solid ${selected ? "var(--navy-tint)" : "transparent"}`,
-                              borderRadius: 8,
-                              textAlign: "left",
-                              cursor: "pointer",
-                            }}
-                          >
-                            <span
-                              style={{
-                                width: 18,
-                                height: 18,
-                                borderRadius: 4,
-                                border: `1.5px solid ${selected ? "var(--navy)" : "#c8c4b5"}`,
-                                background: selected ? "var(--navy)" : "transparent",
-                                color: "#fff",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                              }}
-                            >
-                              {selected ? <Check size={12} aria-hidden="true" /> : null}
-                            </span>
-                            <span className="stack" style={{ minWidth: 0, flex: 1 }}>
-                              <span className="truncate" style={{ fontSize: 13, fontWeight: 500, color: "var(--ink)" }}>
-                                {file.fileName.replace(/\.[^.]+$/, "")}
-                              </span>
-                              <span className="tiny soft truncate">
-                                {file.sizeLabel || file.thumbnailLabel || "資料"}
-                              </span>
-                            </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+                  添付
+                </span>
+              </Button>
 
               <textarea
                 ref={textareaRef}
@@ -622,19 +751,33 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                 rows={1}
                 placeholder="質問を入力"
                 value={input}
-                onChange={(e) => { setInput(e.target.value); adjustTextareaHeight(); }}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  adjustTextareaHeight();
+                }}
                 onKeyDown={(e) => {
                   if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                     e.preventDefault();
                     sendMessage();
                   }
                 }}
-                style={{ resize: "none", minHeight: "unset", padding: "8px 14px", overflowY: "hidden" }}
+                style={{
+                  resize: "none",
+                  minHeight: "unset",
+                  padding: "8px 14px",
+                  overflowY: "hidden",
+                }}
               />
               <Button
                 onClick={sendMessage}
                 disabled={loading || !input.trim()}
-                style={{ height: "auto", paddingLeft: 18, paddingRight: 18, flexDirection: "column", gap: 4 }}
+                style={{
+                  height: "auto",
+                  paddingLeft: 18,
+                  paddingRight: 18,
+                  flexDirection: "column",
+                  gap: 4,
+                }}
               >
                 <Send size={18} aria-hidden="true" />
                 送信
@@ -644,14 +787,32 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
                   type="button"
                   onClick={onSwitchMode}
                   title="マニュアル作成モード"
-                  style={{ width: 44, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 10, letterSpacing: "0.1em", fontWeight: 500 }}
+                  style={{
+                    width: 44,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 2,
+                    border: "1px solid var(--line)",
+                    borderRadius: "var(--radius)",
+                    background: "transparent",
+                    cursor: "pointer",
+                    color: "var(--ink-soft)",
+                    fontSize: 10,
+                    letterSpacing: "0.1em",
+                    fontWeight: 500,
+                  }}
                 >
                   <FileText size={16} aria-hidden="true" />
                   <span>作成</span>
                 </button>
               ) : null}
             </div>
-            <div className="tiny soft" style={{ marginTop: 4, letterSpacing: "0.06em" }}>
+            <div
+              className="tiny soft"
+              style={{ marginTop: 4, letterSpacing: "0.06em" }}
+            >
               ⌘ + Enter で送信
             </div>
           </div>
@@ -682,14 +843,33 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <p style={{ margin: "0 0 6px", fontWeight: 600, fontSize: 15, color: "var(--ink)" }}>
+            <p
+              style={{
+                margin: "0 0 6px",
+                fontWeight: 600,
+                fontSize: 15,
+                color: "var(--ink)",
+              }}
+            >
               チャットを削除
             </p>
-            <p style={{ margin: "0 0 20px", fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.6 }}>
+            <p
+              style={{
+                margin: "0 0 20px",
+                fontSize: 13,
+                color: "var(--ink-soft)",
+                lineHeight: 1.6,
+              }}
+            >
               このチャットの履歴を削除します。この操作は取り消せません。
             </p>
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <Button variant="ghost" onClick={() => setDeleteConfirmId(null)}>
+            <div
+              style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}
+            >
+              <Button
+                variant="ghost"
+                onClick={() => setDeleteConfirmId(null)}
+              >
                 キャンセル
               </Button>
               <Button
@@ -758,7 +938,14 @@ function AssistantMessage({
           >
             知
           </span>
-          <span className="tiny" style={{ color: "var(--navy-deep)", fontWeight: 600, letterSpacing: "0.1em" }}>
+          <span
+            className="tiny"
+            style={{
+              color: "var(--navy-deep)",
+              fontWeight: 600,
+              letterSpacing: "0.1em",
+            }}
+          >
             院内ナレッジ
           </span>
         </div>
@@ -777,13 +964,28 @@ function AssistantMessage({
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           </div>
         </div>
-        <div className="row" style={{ marginTop: 10, gap: 6, flexWrap: "wrap" }}>
-          <span className="tiny soft" style={{ letterSpacing: "0.14em" }}>出典</span>
+        <div
+          className="row"
+          style={{ marginTop: 10, gap: 6, flexWrap: "wrap" }}
+        >
+          <span
+            className="tiny soft"
+            style={{ letterSpacing: "0.14em" }}
+          >
+            出典
+          </span>
           <span className="tag accent">
-            <span className="truncate" style={{ maxWidth: 220 }}>院内資料</span>
+            <span className="truncate" style={{ maxWidth: 220 }}>
+              院内資料
+            </span>
             <span style={{ opacity: 0.75 }}>p.—</span>
           </span>
-          <button type="button" className="btn ghost sm" style={{ marginLeft: 4 }} onClick={onCopy}>
+          <button
+            type="button"
+            className="btn ghost sm"
+            style={{ marginLeft: 4 }}
+            onClick={onCopy}
+          >
             {copied ? (
               <ClipboardCheck size={13} aria-hidden="true" />
             ) : (
