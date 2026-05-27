@@ -416,6 +416,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
           <div
             style={{
               flex: 1,
+              minHeight: 0,
               padding: "28px 28px 8px",
               display: "flex",
               flexDirection: "column",
