@@ -7,6 +7,7 @@ import { clsx } from "clsx";
 
 const navItems = [
   { href: "/", label: "AIチャット" },
+  { href: "/manual", label: "マニュアル作成" },
   { href: "/repository", label: "資料庫" }
 ];
 
