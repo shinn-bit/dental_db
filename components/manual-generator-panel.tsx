@@ -1121,7 +1121,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
           左パネル: 指示チャット
       ══════════════════════════════════════════════════════════════════════ */}
       <div
-        style={{ width: 420, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", position: "relative" }}
+        style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", position: "relative" }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
