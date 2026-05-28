@@ -120,11 +120,7 @@ async function generateSlidesStreaming(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model, systemPrompt, contents,
-      generationConfig: {
-        maxOutputTokens: 65536,
-        temperature: 0.4,
-        thinkingConfig: { thinkingBudget: 0 },
-      },
+      generationConfig: { maxOutputTokens: 65536, temperature: 0.4 },
     }),
   });
   if (!res.ok || !res.body) {
@@ -850,7 +846,14 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
       });
     }
     if (ragContext) {
-      augmentedText = `【院内ナレッジ資料からの関連情報（この内容を参考に作成してください）】\n${ragContext}\n\n【作成指示】\n${augmentedText}`;
+      // スライドは出力HTMLが大きいためRAG入力を高関連度のみ・3,000文字以内に絞る
+      // （入力が多すぎるとGemini 2.5 Flashの思考トークンを圧迫して500エラーになる）
+      let ragForPrompt = ragContext;
+      if (outputType === "slide") {
+        const highOnly = ragContext.split("\n\n【参考程度の院内資料】")[0];
+        ragForPrompt = highOnly.length > 3000 ? highOnly.slice(0, 3000) + "\n…(省略)" : highOnly;
+      }
+      augmentedText = `【院内ナレッジ資料からの関連情報（この内容を参考に作成してください）】\n${ragForPrompt}\n\n【作成指示】\n${augmentedText}`;
     }
 
     try {
