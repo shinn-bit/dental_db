@@ -901,6 +901,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
             slidePrompt,
             setNotice
           );
+          if (slides.length === 0) throw new Error("スライドの生成に失敗しました。再度お試しください。");
           const finalMsgs = [...newHistory, { role: "model" as const, text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` }];
           setSlidesHtml(slides);
           setEditSelectedSlides([]);
