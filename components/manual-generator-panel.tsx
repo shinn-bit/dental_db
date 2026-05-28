@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Download, ExternalLink, FileText, MessageCircle, Plus, Send, Sparkles, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
@@ -61,6 +61,8 @@ type UploadQueue = {
   placementMode: PlacementMode | null;
   placementText: string;
 };
+
+type SessionSummary = { id: string; title: string; type: "manual" };
 
 // ── Gemini API helpers ────────────────────────────────────────────────────────
 
@@ -261,10 +263,20 @@ const SLIDE_SYS_PROMPT = [
   "→ 同じ種類を連続して使わず、各スライドの内容に最も適したビジュアルを自律的に選ぶこと",
   "→ テキストの羅列にしないこと。必ず何らかのビジュアル要素を含める",
   "",
-  "【構成（12枚）】",
-  "1枚目: タイトル（ネイビー背景、テーマを大きく）",
-  "2〜11枚目: 定義→原因→症状→診断→治療手順→注意事項の流れでカバー",
+  "【構成（必ず12枚・以下の順番を厳守）】",
+  "1枚目: タイトルスライド（ネイビー背景、テーマを大きく）",
+  "2枚目: 1. 病気の解説",
+  "3枚目: 2. 原因",
+  "4枚目: 3. 病態・所見",
+  "5枚目: 4. 患者の訴え・臨床所見",
+  "6枚目: 5. 当日の処置・応急処置",
+  "7枚目: 6. 治療法",
+  "8枚目: 7. 治療の具体的なステップ",
+  "9枚目: 8. 治療中に確認するチェックリスト（チェックボックス付き箇条書き形式）",
+  "10枚目: 9. 予後・術後のメンテナンス",
+  "11枚目: 10. その他注意すべきこと",
   "12枚目: まとめ・重要ポイント",
+  "※各スライドの見出しには必ず上記の番号と項目名を含めること。構成を省略・並び替え・統合しないこと。",
 ].join("\n");
 
 const SLIDE_EDIT_SYS_PROMPT = [
@@ -324,6 +336,14 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   const [uploadQueue, setUploadQueue] = useState<UploadQueue | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
+  // Sidebar / session list
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingTitle, setEditingTitle] = useState("");
+
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
   const [editSelectedSlides, setEditSelectedSlides] = useState<number[]>([]);
@@ -371,6 +391,15 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
     const processed = slidesHtml.map(html => injectEmbeddedImages(html, embeddedImageMap));
     return buildSlideIframeHtml(processed, generatedTheme);
   }, [slidesHtml, generatedTheme, embeddedImageMap]);
+
+  useEffect(() => {
+    fetch("/api/chat-sessions")
+      .then(r => r.json())
+      .then((data: { sessions: { id: string; title: string; type?: string }[] }) => {
+        setSessions((data.sessions ?? []).filter(s => s.type === "manual") as SessionSummary[]);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -499,6 +528,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
 
   function newManual() {
     sessionIdRef.current = crypto.randomUUID();
+    setCurrentSessionId(null);
     setMessages([]); setInput(""); setPendingImages([]); setPendingDocs([]); setUploadQueue(null);
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
@@ -561,6 +591,12 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(session),
     }).catch(console.error);
+    setSessions(prev => {
+      const exists = prev.some(s => s.id === id);
+      if (exists) return prev.map(s => s.id === id ? { ...s, title } : s);
+      return [{ id, title, type: "manual" as const }, ...prev];
+    });
+    setCurrentSessionId(id);
   }
 
   // ── Session load ─────────────────────────────────────────────────────────
@@ -568,6 +604,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   useEffect(() => {
     if (!initialSessionId) return;
     sessionIdRef.current = initialSessionId;
+    setCurrentSessionId(initialSessionId);
     (async () => {
       setLoading(true);
       setNotice("読み込み中…");
@@ -620,6 +657,92 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
     })();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialSessionId]);
+
+  async function loadSessionById(id: string) {
+    if (id === sessionIdRef.current && messages.length > 0) return;
+    if (loading) return;
+    setLoading(true);
+    setNotice("読み込み中…");
+    try {
+      const res = await fetch(`/api/chat-sessions/${id}`);
+      if (!res.ok) throw new Error("not found");
+      const session = await res.json() as ManualSession;
+      sessionIdRef.current = id;
+      setCurrentSessionId(id);
+      setContent(session.content ?? "");
+      setSlidesHtml(session.slidesHtml ?? []);
+      setGeneratedOutputType(session.outputType ?? "word");
+      setOutputType(session.outputType ?? "word");
+      setGeneratedTheme(session.generatedTheme ?? "");
+      setEditSelectedSlides([]);
+      embedCounterRef.current = 0;
+      const restoredMsgs: ManualMessage[] = await Promise.all(
+        (session.messages ?? []).map(async msg => {
+          if (!msg.images?.length) return msg as ManualMessage;
+          const images = await Promise.all(msg.images.map(async ref => {
+            const base = {
+              mimeType: ref.mimeType, mode: ref.mode,
+              imageIndex: ref.imageIndex, placement: ref.placement,
+              storageKey: ref.storageKey ?? crypto.randomUUID(),
+              s3Key: ref.s3Key,
+            };
+            if (!ref.s3Key) return { ...base, base64: "", previewUrl: "" } as ManualImagePart;
+            try {
+              const { url } = await fetch("/api/manual-images", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "download", s3Key: ref.s3Key }),
+              }).then(r => r.json()) as { url: string };
+              const blob = await fetch(url).then(r => r.blob());
+              const base64 = await new Promise<string>(resolve => {
+                const reader = new FileReader();
+                reader.onload = () => resolve((reader.result as string).split(",")[1]);
+                reader.readAsDataURL(blob);
+              });
+              return { ...base, base64, previewUrl: URL.createObjectURL(blob) } as ManualImagePart;
+            } catch { return { ...base, base64: "", previewUrl: "" } as ManualImagePart; }
+          }));
+          return { ...msg, images } as ManualMessage;
+        })
+      );
+      setMessages(restoredMsgs);
+      setInput("");
+      setPendingImages([]);
+      setPendingDocs([]);
+      setNotice("");
+    } catch {
+      setNotice("セッションの読み込みに失敗しました");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function deleteSession(id: string) {
+    try {
+      await fetch(`/api/chat-sessions/${id}`, { method: "DELETE" });
+      setSessions(prev => prev.filter(s => s.id !== id));
+      if (sessionIdRef.current === id) newManual();
+    } catch {
+      setNotice("削除に失敗しました");
+    }
+    setMenuOpenId(null);
+  }
+
+  async function renameSession(id: string, title: string) {
+    if (!title.trim()) return;
+    try {
+      await fetch(`/api/chat-sessions/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: title.trim() }),
+      });
+      setSessions(prev => prev.map(s => s.id === id ? { ...s, title: title.trim() } : s));
+    } catch {
+      setNotice("名前の変更に失敗しました");
+    }
+    setEditingId(null);
+    setMenuOpenId(null);
+  }
 
   function getEmbeddedImages(): { imageIndex: number; base64: string; mimeType: string }[] {
     return Array.from(embeddedImageMap.entries()).map(([imageIndex, img]) => ({
@@ -843,6 +966,108 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
 
   return (
     <section className="panel" style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0, width: "100%" }}>
+
+      {/* ── サイドバー（履歴） ── */}
+      <div
+        style={{
+          width: sidebarOpen ? 180 : 40,
+          flexShrink: 0,
+          borderRight: "1px solid var(--line)",
+          display: "flex",
+          flexDirection: "column",
+          transition: "width 0.2s ease",
+          overflow: "hidden",
+          background: "var(--panel-deep, #f8f9fa)",
+          borderRadius: "16px 0 0 16px",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "10px 6px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(v => !v)}
+            title={sidebarOpen ? "サイドバーを閉じる" : "サイドバーを開く"}
+            style={{ width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", flexShrink: 0 }}
+          >
+            {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+          </button>
+          {sidebarOpen ? (
+            <button
+              type="button"
+              onClick={newManual}
+              title="新しいマニュアル"
+              style={{ flex: 1, display: "flex", alignItems: "center", gap: 5, padding: "4px 6px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}
+            >
+              <Plus size={13} aria-hidden="true" />
+              新しいマニュアル
+            </button>
+          ) : null}
+        </div>
+
+        {sidebarOpen ? (
+          <div style={{ flex: 1, overflowY: "auto", padding: "6px 4px" }}>
+            {sessions.length === 0 ? (
+              <p style={{ fontSize: 11, color: "var(--ink-muted)", padding: "12px 8px", margin: 0 }}>履歴なし</p>
+            ) : (
+              sessions.map(session => (
+                <div
+                  key={session.id}
+                  style={{ position: "relative", marginBottom: 1 }}
+                  onMouseLeave={() => { if (menuOpenId === session.id) setMenuOpenId(null); }}
+                >
+                  {editingId === session.id ? (
+                    <input
+                      autoFocus
+                      value={editingTitle}
+                      onChange={e => setEditingTitle(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") renameSession(session.id, editingTitle);
+                        if (e.key === "Escape") { setEditingId(null); setMenuOpenId(null); }
+                      }}
+                      onBlur={() => renameSession(session.id, editingTitle)}
+                      style={{ width: "100%", fontSize: 12, padding: "4px 6px", border: "1px solid var(--navy)", borderRadius: 4, outline: "none", background: "#fff" }}
+                    />
+                  ) : (
+                    <div
+                      style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 4px 6px 8px", borderRadius: 6, background: currentSessionId === session.id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer" }}
+                      onClick={() => loadSessionById(session.id)}
+                    >
+                      <FileText size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                      <span style={{ flex: 1, fontSize: 12, color: currentSessionId === session.id ? "var(--navy)" : "var(--ink-soft)", fontWeight: currentSessionId === session.id ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {session.title}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setMenuOpenId(menuOpenId === session.id ? null : session.id); }}
+                        style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", borderRadius: 3, color: "var(--ink-faint)", flexShrink: 0 }}
+                      >
+                        <MoreHorizontal size={12} aria-hidden="true" />
+                      </button>
+                    </div>
+                  )}
+                  {menuOpenId === session.id ? (
+                    <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 50, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 120, padding: "4px 0" }}>
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); setEditingId(session.id); setEditingTitle(session.title); setMenuOpenId(null); }}
+                        style={{ width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "var(--ink)" }}
+                      >
+                        名前を変更
+                      </button>
+                      <button
+                        type="button"
+                        onClick={e => { e.stopPropagation(); deleteSession(session.id); }}
+                        style={{ width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12, border: "none", background: "none", cursor: "pointer", color: "#c0392b" }}
+                      >
+                        削除
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
+      </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
           左パネル: 指示チャット
