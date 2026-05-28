@@ -6,7 +6,11 @@ type StreamRequest = {
   model: string;
   systemPrompt: string;
   contents: unknown;
-  generationConfig?: { maxOutputTokens?: number; temperature?: number };
+  generationConfig?: {
+    maxOutputTokens?: number;
+    temperature?: number;
+    thinkingConfig?: { thinkingBudget?: number };
+  };
 };
 
 const RETRY_DELAYS = [2000, 4000]; // 2回リトライ: 2秒後・4秒後
@@ -18,7 +22,7 @@ async function fetchGemini(url: string, body: string): Promise<Response> {
       headers: { "Content-Type": "application/json" },
       body,
     });
-    if (res.status !== 503 || attempt === RETRY_DELAYS.length) return res;
+    if ((res.status !== 503 && res.status !== 500) || attempt === RETRY_DELAYS.length) return res;
     await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
   }
   throw new Error("unreachable");

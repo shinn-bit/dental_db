@@ -120,7 +120,11 @@ async function generateSlidesStreaming(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       model, systemPrompt, contents,
-      generationConfig: { maxOutputTokens: 65536, temperature: 0.4 },
+      generationConfig: {
+        maxOutputTokens: 65536,
+        temperature: 0.4,
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
   if (!res.ok || !res.body) {
