@@ -81,6 +81,7 @@ async function streamGenerate(
   });
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => "");
+    if (res.status === 503) throw new Error("Gemini APIが混雑しています。しばらく待ってから再試行してください。");
     let detail = errText;
     try { detail = JSON.stringify(JSON.parse(errText), null, 2); } catch {}
     throw new Error(`Gemini API エラー ${res.status} (${model}): ${detail}`);
