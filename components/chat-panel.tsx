@@ -21,9 +21,10 @@ const ALLOWED_MIME_TYPES = [
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
 const MAX_FILES = 5;
 
-export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
+export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId }: {
   onSwitchMode?: () => void;
   onLoadManualSession?: (id: string) => void;
+  initialSessionId?: string | null;
 }) {
   // Session management
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -70,6 +71,19 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession }: {
       .then((data: { sessions: SessionSummary[] }) => setSessions(data.sessions ?? []))
       .catch(() => {});
   }, []);
+
+  // Load session specified via URL param
+  useEffect(() => {
+    if (!initialSessionId) return;
+    fetch(`/api/chat-sessions/${initialSessionId}`)
+      .then((r) => { if (!r.ok) throw new Error(); return r.json(); })
+      .then((data: { messages?: ChatMessage[]; bedrockSessionId?: string }) => {
+        setCurrentSessionId(initialSessionId);
+        setMessages(data.messages ?? []);
+        setBedrockSessionId(data.bedrockSessionId ?? "");
+      })
+      .catch(() => {});
+  }, [initialSessionId]);
 
   // Auto scroll to bottom on new messages
   useEffect(() => {

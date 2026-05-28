@@ -3,10 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
-const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
 const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -62,7 +61,7 @@ type UploadQueue = {
   placementText: string;
 };
 
-type SessionSummary = { id: string; title: string; type: "manual" };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
 
 // ── Gemini API helpers ────────────────────────────────────────────────────────
 
@@ -72,18 +71,14 @@ async function streamGenerate(
   contents: GeminiContent[],
   onChunk: (accumulated: string) => void
 ): Promise<void> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { maxOutputTokens: 65536, temperature: 0.3 }
-      })
-    }
-  );
+  const res = await fetch("/api/manual-stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model, systemPrompt, contents,
+      generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
+    }),
+  });
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => "");
     let detail = errText;
@@ -119,18 +114,14 @@ async function generateSlidesStreaming(
   systemPrompt: string,
   onProgress: (notice: string) => void
 ): Promise<string[]> {
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { maxOutputTokens: 65536, temperature: 0.4 }
-      })
-    }
-  );
+  const res = await fetch("/api/manual-stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model, systemPrompt, contents,
+      generationConfig: { maxOutputTokens: 65536, temperature: 0.4 },
+    }),
+  });
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => "");
     if (res.status === 503) throw new Error("gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。");
@@ -156,7 +147,7 @@ async function generateSlidesStreaming(
         if (text) {
           accumulated += text;
           const count = (accumulated.match(/===SLIDE_\d+===/g) ?? []).length;
-          if (count > 0) onProgress(`スライドを生成中… ${count} / 12 枚`);
+          if (count > 0) onProgress(`スライドを生成中… ${count} 枚`);
         }
       } catch {}
     }
@@ -286,6 +277,29 @@ const SLIDE_EDIT_SYS_PROMPT = [
   ...SLIDE_SPEC_LINES,
 ].join("\n");
 
+function buildSlideRegenSysPrompt(currentCount: number): string {
+  return [
+    "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
+    "ユーザーの指示に従い、スライドを再生成してください。",
+    "修正指示がある場合は全スライドを再生成してください。",
+    `現在のスライド枚数: ${currentCount}枚`,
+    "スライド枚数はユーザーの指示に従ってください。枚数の指定がない場合は現在の枚数を維持してください。勝手に増減しないこと。",
+    "【出力形式】各スライドを ===SLIDE_N===（N=1から連番）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。",
+    "画像の取り扱い:",
+    "- 参考画像: 内容生成の参考としてください",
+    "- 埋め込み画像IMAGE_N: NをそのままINDEXに使い <div data-image=\"INDEX\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入する",
+    "",
+    "【各スライドの仕様】",
+    ...SLIDE_SPEC_LINES,
+    "",
+    "【使えるビジュアル表現（自由に組み合わせてよい）】",
+    "SVGフローチャート / SVGタイムライン / SVG棒グラフ・円グラフ / 2カラム比較レイアウト",
+    "/ グリッドカード / HTMLテーブル / チェックリスト / SVGアイコン付き説明カード / SVG警告バナー",
+    "→ 同じ種類を連続して使わず、各スライドの内容に最も適したビジュアルを自律的に選ぶこと",
+    "→ テキストの羅列にしないこと。必ず何らかのビジュアル要素を含める",
+  ].join("\n");
+}
+
 // ── Gemini contents builder ───────────────────────────────────────────────────
 
 // 履歴なし・1ターン構成。編集時は docContext に現在のドキュメントを渡す。
@@ -325,9 +339,10 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
+export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadChatSession }: {
   onSwitchMode?: () => void;
   initialSessionId?: string | null;
+  onLoadChatSession?: (id: string) => void;
 }) {
   const [messages, setMessages] = useState<ManualMessage[]>([]);
   const [input, setInput] = useState("");
@@ -395,8 +410,8 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   useEffect(() => {
     fetch("/api/chat-sessions")
       .then(r => r.json())
-      .then((data: { sessions: { id: string; title: string; type?: string }[] }) => {
-        setSessions((data.sessions ?? []).filter(s => s.type === "manual") as SessionSummary[]);
+      .then((data: { sessions: SessionSummary[] }) => {
+        setSessions(data.sessions ?? []);
       })
       .catch(() => {});
   }, []);
@@ -594,7 +609,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
     setSessions(prev => {
       const exists = prev.some(s => s.id === id);
       if (exists) return prev.map(s => s.id === id ? { ...s, title } : s);
-      return [{ id, title, type: "manual" as const }, ...prev];
+      return [{ id, title, type: "manual" as const satisfies SessionSummary["type"] }, ...prev];
     });
     setCurrentSessionId(id);
   }
@@ -755,7 +770,6 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   async function sendMessage() {
     const text = input.trim();
     if ((!text && pendingImages.length === 0) || loading) return;
-    if (!GEMINI_API_KEY) { setNotice("NEXT_PUBLIC_GEMINI_API_KEY が設定されていません"); return; }
 
     const userMsg: ManualMessage = {
       role: "user",
@@ -801,6 +815,26 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       setEditSelectedSlides([]);
     }
 
+    // 初回のみ院内資料をRAGで取得してコンテキストに注入
+    let ragContext = "";
+    if (isFirstMessage && text.trim()) {
+      try {
+        setNotice("院内資料を検索中…");
+        const ctxRes = await fetch("/api/manual-context", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: text }),
+        });
+        const { context, found } = (await ctxRes.json()) as { context: string; found: number };
+        if (context) {
+          ragContext = context;
+          setNotice(`院内資料 ${found}件 を参照して生成します`);
+          await new Promise(r => setTimeout(r, 800));
+        }
+      } catch { /* RAG失敗時は無視してGemini単体で生成 */ }
+      setNotice("");
+    }
+
     // Augment user text with embedded image placement instructions
     const embeddedInThisMsg = pendingImages.filter(img => img.mode === "embed");
     let augmentedText = text;
@@ -809,6 +843,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       embeddedInThisMsg.forEach(img => {
         augmentedText += `IMAGE_${img.imageIndex}: ${img.placement ?? "最適な位置に配置してください"}\n`;
       });
+    }
+    if (ragContext) {
+      augmentedText = `【院内ナレッジ資料からの関連情報（この内容を参考に作成してください）】\n${ragContext}\n\n【作成指示】\n${augmentedText}`;
     }
 
     try {
@@ -847,10 +884,13 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
           // ── 全スライド生成（ストリーミング）──────────────────────────────
           setNotice("スライドを生成中…");
           const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
+          const slidePrompt = isFirstMessage
+            ? SLIDE_SYS_PROMPT
+            : buildSlideRegenSysPrompt(slidesHtml.length);
           const slides = await generateSlidesStreaming(
             GEMINI_FLASH_MODEL,
             buildContents(augmentedText, pendingImages, resolvedDocs),
-            SLIDE_SYS_PROMPT,
+            slidePrompt,
             setNotice
           );
           const finalMsgs = [...newHistory, { role: "model" as const, text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` }];
@@ -1029,9 +1069,16 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
                   ) : (
                     <div
                       style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 4px 6px 8px", borderRadius: 6, background: currentSessionId === session.id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer" }}
-                      onClick={() => loadSessionById(session.id)}
+                      onClick={() => {
+                        if (session.type === "manual") loadSessionById(session.id);
+                        else onLoadChatSession?.(session.id);
+                      }}
                     >
-                      <FileText size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                      {session.type === "manual" ? (
+                        <Wrench size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                      ) : (
+                        <MessageCircle size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                      )}
                       <span style={{ flex: 1, fontSize: 12, color: currentSessionId === session.id ? "var(--navy)" : "var(--ink-soft)", fontWeight: currentSessionId === session.id ? 600 : 400, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {session.title}
                       </span>

@@ -17,6 +17,7 @@ function ManualContent() {
         <ManualGeneratorPanel
           onSwitchMode={() => router.push("/")}
           initialSessionId={sessionId}
+          onLoadChatSession={(id) => router.push(`/?sessionId=${id}`)}
         />
       </div>
     </>
