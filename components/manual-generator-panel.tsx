@@ -1314,22 +1314,6 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
             <span className="panel-title">マニュアル作成</span>
           </div>
           <div className="row" style={{ gap: 6 }}>
-            {/* 出力形式トグル */}
-            <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
-              {(["word", "slide"] as const).map(type => {
-                const isActive = (messages.length === 0 ? outputType : generatedOutputType) === type;
-                const canSwitch = messages.length === 0 && !loading;
-                return (
-                  <button key={type} type="button"
-                    onClick={() => { if (canSwitch) setOutputType(type); }}
-                    title={type === "word" ? "Word文書" : "スライド"}
-                    style={{ padding: "4px 10px", fontSize: 11, fontWeight: isActive ? 600 : 400, background: isActive ? "var(--navy)" : "transparent", color: isActive ? "#fff" : "var(--ink-soft)", border: 0, cursor: canSwitch ? "pointer" : "default", opacity: !canSwitch && !isActive ? 0.4 : 1 }}
-                  >
-                    {type === "word" ? "Word" : "Slides"}
-                  </button>
-                );
-              })}
-            </div>
             <button type="button" onClick={newManual} title="新しいマニュアル"
               style={{ width: 28, height: 28, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Plus size={15} aria-hidden="true" />
