@@ -1098,11 +1098,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
 
     try {
       const slideContents = buildContents(instruction, [], undefined, content);
-      const slides = await generateSlidesInBatches(
+      const slides = await generateSlidesStreaming(
         GEMINI_FLASH_MODEL,
         slideContents,
-        12,
-        (startN) => buildInitialBatchSysPrompt(Math.floor((startN - 1) / 4)),
+        SLIDE_SYS_PROMPT,
         setNotice
       );
       if (slides.length === 0) throw new Error("スライドの生成に失敗しました。再度お試しください。");
