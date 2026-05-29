@@ -216,7 +216,7 @@ export async function POST(request: Request) {
     console.log(`[chat/images] retrieveResults=${retrievalResults.length}`);
 
     const images = bucket && retrievalResults.length > 0
-      ? await extractImagesFromRetrieveResults(retrievalResults, bucket).catch((err) => {
+      ? await extractImagesFromRetrieveResults(retrievalResults, bucket, message).catch((err) => {
           console.error("[chat/images] extractImagesFromRetrieveResults failed:", String(err));
           return [] as ChatImage[];
         })
@@ -244,18 +244,23 @@ type ChatImage = {
 };
 
 // RetrieveCommand の結果から画像を抽出する
-// （カスタムpromptTemplate使用時はRetrieveAndGenerateのcitationsにretrievedReferencesが入らないため）
-// （カスタムpromptTemplate使用時はRetrieveAndGenerateのcitationsにretrievedReferencesが入らないため）
+// KB再同期不要：ユーザーの質問キーワードとmetadata.images[].descriptionを直接マッチング
 async function extractImagesFromRetrieveResults(
   retrievalResults: Array<{
     content?: { text?: string };
     location?: { s3Location?: { uri?: string } };
   }>,
-  bucket: string
+  bucket: string,
+  query: string
 ): Promise<ChatImage[]> {
   const s3 = createS3Client();
   const results: ChatImage[] = [];
   const processedDocIds = new Set<string>();
+
+  // 質問から検索キーワードを抽出（2文字以上）
+  const queryKeywords = Array.from(
+    new Set(query.replace(/[　！？。、・「」【】（）]/g, " ").split(/\s+/).filter(w => w.length >= 2))
+  );
 
   for (const ref of retrievalResults) {
     const uri = ref.location?.s3Location?.uri ?? "";
@@ -279,18 +284,18 @@ async function extractImagesFromRetrieveResults(
       const docImages = metadata.images ?? [];
       if (docImages.length === 0) continue;
 
-      // 参照テキスト内の「Nページ」パターンからページ番号を抽出
-      const retrievedText = ref.content?.text ?? "";
-      const mentionedPages = new Set<number>(
-        [...retrievedText.matchAll(/【(\d+)ページ/g)].map((m) => parseInt(m[1]))
-      );
+      // 画像説明にキーワードが含まれるものをスコアリング
+      const scored = docImages
+        .map(img => ({
+          img,
+          score: queryKeywords.filter(kw => img.description.includes(kw)).length,
+        }))
+        .filter(s => s.score >= 1)
+        .sort((a, b) => b.score - a.score);
 
-      // ページ番号が明示されている場合のみ表示（フォールバックなし）
-      // KB再同期後は kb/{id}.md の画像説明がインデックスされ自然にマッチする
-      if (mentionedPages.size === 0) continue;
-      const candidates = docImages.filter((img) => mentionedPages.has(img.page));
+      console.log(`[chat/images] doc=${docId.slice(0, 8)} total=${docImages.length} matched=${scored.length}`);
 
-      for (const img of candidates.slice(0, 3)) {
+      for (const { img } of scored.slice(0, 3)) {
         const url = await getSignedUrl(
           s3,
           new GetObjectCommand({ Bucket: bucket, Key: img.s3Key }),

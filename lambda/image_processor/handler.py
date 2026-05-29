@@ -261,10 +261,15 @@ def append_images_to_kb(file_id: str, images: list[dict]):
     except Exception:
         existing = ""
 
+    # KB チャンクの metadata サイズ制限（S3 Vectors: 2048 bytes）に収めるため
+    # 説明文は 80 文字以内に短縮して登録する（全文は metadata.images[] に保存済み）
     section_lines = ["\n\n## 資料内の画像・図\n"]
     for img in images:
+        short_desc = img['description'][:80].rstrip()
+        if len(img['description']) > 80:
+            short_desc += "…"
         section_lines.append(
-            f"- 【{img['page']}ページ 画像{img['index'] + 1}】{img['description']}"
+            f"- 【{img['page']}ページ 画像{img['index'] + 1}】{short_desc}"
         )
     section_lines.append("")
 
