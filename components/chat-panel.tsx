@@ -6,7 +6,8 @@ import remarkGfm from "remark-gfm";
 import { ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, MoreHorizontal, Paperclip, Plus, Send, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
-type ChatMessage = { role: "user" | "assistant"; text: string };
+type ChatImage = { url: string; description: string; page: number; documentName: string };
+type ChatMessage = { role: "user" | "assistant"; text: string; images?: ChatImage[] };
 type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
 
 const ALLOWED_MIME_TYPES = [
@@ -266,6 +267,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
         answer?: string;
         error?: string;
         bedrockSessionId?: string;
+        images?: ChatImage[];
       };
       if (!res.ok) throw new Error(data.error || "Failed to chat");
 
@@ -274,7 +276,11 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
         "資料庫から該当する内容を見つけられませんでした。資料の同期状態を確認してください。";
       const allMessages: ChatMessage[] = [
         ...withUser,
-        { role: "assistant", text: assistantText },
+        {
+          role: "assistant",
+          text: assistantText,
+          ...(data.images && data.images.length > 0 ? { images: data.images } : {}),
+        },
       ];
       setMessages(allMessages);
 
@@ -680,6 +686,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                 <AssistantMessage
                   key={index}
                   text={msg.text}
+                  images={msg.images}
                   copied={copiedMessageIndex === index}
                   onCopy={() => copyMessage(msg.text, index)}
                 />
@@ -958,10 +965,12 @@ function UserMessage({ text }: { text: string }) {
 
 function AssistantMessage({
   text,
+  images,
   copied,
   onCopy,
 }: {
   text: string;
+  images?: ChatImage[];
   copied: boolean;
   onCopy: () => void;
 }) {
@@ -1011,6 +1020,28 @@ function AssistantMessage({
           <div className="prose-lite">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           </div>
+          {images && images.length > 0 ? (
+            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+              <div className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.08em" }}>
+                関連資料の画像
+              </div>
+              {images.map((img, i) => (
+                <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
+                  <img
+                    src={img.url}
+                    alt={img.description}
+                    style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block", background: "#f8f9fa" }}
+                  />
+                  <div style={{ padding: "8px 12px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)" }}>
+                    <div style={{ fontSize: 11, color: "var(--ink-muted)", marginBottom: 3, letterSpacing: "0.06em" }}>
+                      {img.documentName.replace(/\.[^.]+$/, "")} — {img.page}ページ
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.6 }}>{img.description}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div
           className="row"

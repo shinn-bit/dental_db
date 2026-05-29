@@ -2,9 +2,11 @@ import {
   RetrieveAndGenerateCommand,
   type RetrievalFilter
 } from "@aws-sdk/client-bedrock-agent-runtime";
+import { GetObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { NextResponse } from "next/server";
-import { createBedrockAgentRuntimeClient, createBedrockRuntimeClient } from "@/lib/aws";
+import { createBedrockAgentRuntimeClient, createBedrockRuntimeClient, createS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
@@ -188,16 +190,107 @@ export async function POST(request: Request) {
       })
     );
 
+    const bucket = appEnv.s3BucketName;
+    const images = bucket
+      ? await extractImagesFromCitations(
+          (response.citations ?? []) as Citation[],
+          bucket
+        ).catch(() => [])
+      : [];
+
     return NextResponse.json({
       answer: response.output?.text || "",
       citations: response.citations || [],
       bedrockSessionId: response.sessionId || "",
+      images,
     });
   } catch (error) {
     const msg =
       error instanceof Error ? error.message : "Unknown Bedrock error";
     return NextResponse.json({ error: msg }, { status: 500 });
   }
+}
+
+type ChatImage = {
+  url: string;
+  description: string;
+  page: number;
+  documentName: string;
+};
+
+type Citation = {
+  retrievedReferences?: Array<{
+    content?: { text?: string };
+    location?: { s3Location?: { uri?: string } };
+  }>;
+};
+
+async function extractImagesFromCitations(
+  citations: Citation[],
+  bucket: string
+): Promise<ChatImage[]> {
+  const s3 = createS3Client();
+  const results: ChatImage[] = [];
+  const processedDocIds = new Set<string>();
+
+  for (const citation of citations) {
+    for (const ref of citation.retrievedReferences ?? []) {
+      const uri = ref.location?.s3Location?.uri ?? "";
+      // kb/{id}.md の形式から id を抽出
+      const match = uri.match(/\/kb\/([^/]+)\.md$/);
+      if (!match) continue;
+
+      const docId = match[1];
+      if (processedDocIds.has(docId)) continue;
+      processedDocIds.add(docId);
+
+      // メタデータを取得
+      try {
+        const metaRes = await s3.send(
+          new GetObjectCommand({ Bucket: bucket, Key: `${appEnv.s3MetadataPrefix}${docId}.json` })
+        );
+        const metaText = await metaRes.Body?.transformToString() ?? "{}";
+        const metadata = JSON.parse(metaText) as {
+          fileName?: string;
+          images?: Array<{ page: number; s3Key: string; description: string }>;
+        };
+
+        const docImages = metadata.images ?? [];
+        if (docImages.length === 0) continue;
+
+        // 参照テキスト内の「Nページ」パターンからページ番号を抽出
+        const retrievedText = ref.content?.text ?? "";
+        const mentionedPages = new Set<number>(
+          [...retrievedText.matchAll(/【(\d+)ページ/g)].map((m) => parseInt(m[1]))
+        );
+
+        // ページ番号が一致する画像を優先、なければドキュメント先頭の画像を使用
+        const candidates = mentionedPages.size > 0
+          ? docImages.filter((img) => mentionedPages.has(img.page))
+          : docImages.slice(0, 2);
+
+        for (const img of candidates.slice(0, 3)) {
+          const url = await getSignedUrl(
+            s3,
+            new GetObjectCommand({ Bucket: bucket, Key: img.s3Key }),
+            { expiresIn: 3600 }
+          );
+          results.push({
+            url,
+            description: img.description,
+            page: img.page,
+            documentName: metadata.fileName ?? docId,
+          });
+          if (results.length >= 5) break;
+        }
+      } catch { continue; }
+
+      if (results.length >= 5) break;
+    }
+    if (results.length >= 5) break;
+  }
+
+  return results;
 }
 
 function createSourceUriFilter(
