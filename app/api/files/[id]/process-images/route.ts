@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { appEnv } from "@/lib/env";
 import { fromIni } from "@aws-sdk/credential-providers";
 
-export const maxDuration = 30;
+export const maxDuration = 10;
 
 function createLambdaClient() {
   const credentials = appEnv.awsProfile ? fromIni({ profile: appEnv.awsProfile }) : undefined;
@@ -24,23 +24,16 @@ export async function POST(
 
   try {
     const lambda = createLambdaClient();
-    const result = await lambda.send(
+    // 非同期で起動（Lambdaは最大15分かかるためfire-and-forget）
+    await lambda.send(
       new InvokeCommand({
         FunctionName: functionName,
-        InvocationType: "RequestResponse",
+        InvocationType: "Event",
         Payload: Buffer.from(JSON.stringify({ fileId: id })),
       })
     );
 
-    const payload = result.Payload
-      ? JSON.parse(Buffer.from(result.Payload).toString("utf-8"))
-      : {};
-
-    if (result.FunctionError) {
-      return NextResponse.json({ error: "Lambda実行エラー", detail: payload }, { status: 500 });
-    }
-
-    return NextResponse.json(payload);
+    return NextResponse.json({ status: "STARTED", fileId: id });
   } catch (err) {
     console.error("[process-images]", err);
     return NextResponse.json(

@@ -102,7 +102,7 @@ export function FileRepositoryManager() {
   const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
   const [blockedSummaryId, setBlockedSummaryId] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
-  const [imageProcessingId, setImageProcessingId] = useState<string | null>(null);
+  const [imageProcessingIds, setImageProcessingIds] = useState<Set<string>>(new Set());
   const [imageGallery, setImageGallery] = useState<{ file: RepositoryFile; images: { index: number; page: number; description: string; url: string }[] } | null>(null);
 
   // Load from localStorage on mount
@@ -325,23 +325,40 @@ export function FileRepositoryManager() {
   }
 
   async function processImages(file: RepositoryFile) {
-    setImageProcessingId(file.id);
-    setNotice("画像処理を開始しました。数分かかる場合があります…");
+    setImageProcessingIds((prev) => new Set(prev).add(file.id));
+    setNotice("画像処理を開始しました。完了まで数分かかります…");
     try {
       const res = await fetch(`/api/files/${file.id}/process-images`, { method: "POST" });
-      const data = (await res.json()) as { status?: string; imageCount?: number; error?: string };
-      if (!res.ok) throw new Error(data.error || "画像処理に失敗しました。");
-      if (data.status === "COMPLETED" && typeof data.imageCount === "number") {
-        setNotice(`画像処理完了：${data.imageCount}枚の画像を取得しました。`);
-        await loadFiles({ updateNotice: false });
-      } else {
-        setNotice(data.status === "SKIPPED" ? "このファイルは画像処理の対象外です。" : "画像処理を開始しました。完了後に「画像を見る」ボタンが有効になります。");
-      }
+      const data = (await res.json()) as { status?: string; error?: string };
+      if (!res.ok) throw new Error(data.error || "画像処理の開始に失敗しました。");
+      // Lambda は非同期で動作中 → ポーリングで完了を検知
+      startImagePolling(file.id);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "画像処理に失敗しました。");
-    } finally {
-      setImageProcessingId(null);
+      setImageProcessingIds((prev) => { const s = new Set(prev); s.delete(file.id); return s; });
     }
+  }
+
+  function startImagePolling(fileId: string) {
+    const interval = window.setInterval(async () => {
+      try {
+        const res = await fetch(`/api/files/${fileId}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { file?: { images?: unknown[] } };
+        const imageCount = data.file?.images?.length ?? 0;
+        if (imageCount > 0) {
+          window.clearInterval(interval);
+          setImageProcessingIds((prev) => { const s = new Set(prev); s.delete(fileId); return s; });
+          setNotice(`画像処理完了：${imageCount}枚の画像を取得しました。`);
+          await loadFiles({ updateNotice: false });
+        }
+      } catch { /* ignore polling errors */ }
+    }, 20000); // 20秒ごとに確認
+    // 最大20分でポーリング停止
+    window.setTimeout(() => {
+      window.clearInterval(interval);
+      setImageProcessingIds((prev) => { const s = new Set(prev); s.delete(fileId); return s; });
+    }, 1200000);
   }
 
   async function openImages(file: RepositoryFile) {
@@ -594,7 +611,7 @@ export function FileRepositoryManager() {
             />
             <div style={{ overflowY: "auto", minHeight: 0, borderLeft: "1px solid var(--line)" }}>
               {searching ? (
-                <SearchResults hits={searchHits} onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile} onProcessImages={processImages} onOpenImages={openImages} query={libQuery} summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} imageProcessingId={imageProcessingId} drag={dragCtx} />
+                <SearchResults hits={searchHits} onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile} onProcessImages={processImages} onOpenImages={openImages} query={libQuery} summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} imageProcessingIds={imageProcessingIds} drag={dragCtx} />
               ) : !cat ? (
                 <CategoryGrid
                   library={library}
@@ -613,7 +630,7 @@ export function FileRepositoryManager() {
                   summaryProcessingId={summaryProcessingId}
                   blockedSummaryId={blockedSummaryId}
                   deletingId={deletingId}
-                  imageProcessingId={imageProcessingId}
+                  imageProcessingIds={imageProcessingIds}
                 />
               ) : !sub ? (
                 <SubcategoryView
@@ -638,7 +655,7 @@ export function FileRepositoryManager() {
                   summaryProcessingId={summaryProcessingId}
                   blockedSummaryId={blockedSummaryId}
                   deletingId={deletingId}
-                  imageProcessingId={imageProcessingId}
+                  imageProcessingIds={imageProcessingIds}
                   drag={dragCtx}
                 />
               )}
@@ -796,7 +813,7 @@ function TreeNode({ label, count, active, onClick, chevron, onChevron, indent = 
 }
 
 // ── Category grid (root) ────────────────────────────────────────
-function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag, unassignedFiles, onOpenSummary, onDetail, onDeleteFile, onProcessImages, onOpenImages, summaryProcessingId, blockedSummaryId, deletingId, imageProcessingId }: {
+function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag, unassignedFiles, onOpenSummary, onDetail, onDeleteFile, onProcessImages, onOpenImages, summaryProcessingId, blockedSummaryId, deletingId, imageProcessingIds }: {
   library: LibraryCategory[];
   onPick: (c: LibraryCategory) => void;
   onAdd: (label: string) => void;
@@ -813,7 +830,7 @@ function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCateg
   summaryProcessingId: string | null;
   blockedSummaryId: string | null;
   deletingId: string | null;
-  imageProcessingId: string | null;
+  imageProcessingIds: Set<string>;
 }) {
   return (
     <div style={{ padding: 20 }}>
@@ -838,7 +855,7 @@ function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCateg
                 key={f.id} file={f} drag={drag}
                 onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDeleteFile}
                 onProcessImages={onProcessImages} onOpenImages={onOpenImages}
-                summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} imageProcessingId={imageProcessingId}
+                summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} imageProcessingIds={imageProcessingIds}
               />
             ))}
           </div>
@@ -1052,7 +1069,7 @@ type FileGridCommonProps = {
   summaryProcessingId: string | null;
   blockedSummaryId: string | null;
   deletingId: string | null;
-  imageProcessingId: string | null;
+  imageProcessingIds: Set<string>;
   drag: DragCtx;
 };
 
@@ -1111,11 +1128,11 @@ function SearchResults({ hits, query, ...props }: FileGridCommonProps & { hits: 
   );
 }
 
-function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail, onDelete, onProcessImages, onOpenImages, imageProcessingId }: FileGridCommonProps & { file: RepositoryFile; processing?: boolean; blocked?: boolean; deleting?: boolean }) {
+function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail, onDelete, onProcessImages, onOpenImages, imageProcessingIds }: FileGridCommonProps & { file: RepositoryFile; processing?: boolean; blocked?: boolean; deleting?: boolean }) {
   const needsOcr = file.textExtractionStatus === "ocr_required";
   const canSummary = file.preparationStatus === "completed";
   const summaryInProgress = file.summaryStatus === "processing" || processing;
-  const imageProcessing = imageProcessingId === file.id;
+  const imageProcessing = imageProcessingIds.has(file.id);
   const canProcessImages = file.contentType.includes("pdf") && file.preparationStatus === "completed";
 
   return (
@@ -1176,7 +1193,7 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
   );
 }
 
-function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deletingId, imageProcessingId, onOpenSummary, onDetail, onDelete, onProcessImages, onOpenImages, drag }: FileGridCommonProps & { file: RepositoryFile }) {
+function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deletingId, imageProcessingIds, onOpenSummary, onDetail, onDelete, onProcessImages, onOpenImages, drag }: FileGridCommonProps & { file: RepositoryFile }) {
   return (
     <div draggable onDragStart={(e) => { drag.setDraggedId(file.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", file.id); }}
       onDragEnd={() => { drag.setDraggedId(null); drag.setDropTarget(null); }}
@@ -1188,7 +1205,7 @@ function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deleti
         deleting={deletingId === file.id}
         onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDelete}
         onProcessImages={onProcessImages} onOpenImages={onOpenImages}
-        summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} imageProcessingId={imageProcessingId}
+        summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} imageProcessingIds={imageProcessingIds}
       />
     </div>
   );

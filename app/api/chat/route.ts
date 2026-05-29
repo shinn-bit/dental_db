@@ -195,8 +195,14 @@ export async function POST(request: Request) {
       ? await extractImagesFromCitations(
           (response.citations ?? []) as Citation[],
           bucket
-        ).catch(() => [])
+        ).catch((err) => {
+          console.error("[chat/images] extractImagesFromCitations failed:", err);
+          return [] as ChatImage[];
+        })
       : [];
+    if (images.length > 0) {
+      console.log(`[chat/images] ${images.length} images found for response`);
+    }
 
     return NextResponse.json({
       answer: response.output?.text || "",
