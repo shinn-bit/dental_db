@@ -31,6 +31,16 @@ export type StoredFileMetadata = {
   extractedTextLength?: number;
   textractJobId?: string;
   uploadedAt: string;
+  imageProcessedAt?: string;
+  images?: Array<{
+    index: number;
+    page: number;
+    s3Key: string;
+    width?: number;
+    height?: number;
+    description: string;
+    descriptionSource: "caption" | "vision" | "error";
+  }>;
 };
 
 export type FileMetadataInput = Partial<StoredFileMetadata> & Record<string, unknown>;
