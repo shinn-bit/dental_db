@@ -1,7 +1,11 @@
+import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { NextRequest, NextResponse } from "next/server";
-import { appEnv } from "@/lib/env";
+import { appEnv, requireEnv } from "@/lib/env";
+import { createS3Client } from "@/lib/aws";
 import { fromIni } from "@aws-sdk/credential-providers";
+import { parseS3Json } from "@/lib/s3-json";
+import { normalizeFileMetadata, type FileMetadataInput } from "@/lib/file-assets";
 
 export const maxDuration = 10;
 
@@ -20,12 +24,31 @@ export async function POST(
   const { id } = await params;
   if (!id) return NextResponse.json({ error: "id is required" }, { status: 400 });
 
+  const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
+  const metaKey = `${appEnv.s3MetadataPrefix}${id}.json`;
   const functionName = process.env.IMAGE_PROCESSOR_FUNCTION_NAME ?? "dental-image-processor-dev";
+  const s3 = createS3Client();
 
   try {
-    const lambda = createLambdaClient();
-    // 非同期で起動（Lambdaは最大15分かかるためfire-and-forget）
-    await lambda.send(
+    // メタデータに "processing" を書き込む（フロントがすぐ状態を確認できるように）
+    const metaRes = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: metaKey }));
+    const metaText = await metaRes.Body?.transformToString() ?? "{}";
+    const metadata = normalizeFileMetadata(parseS3Json<FileMetadataInput>(metaText));
+
+    const updated = {
+      ...metadata,
+      imageProcessingStatus: "processing" as const,
+      imageProcessingError: "",
+    };
+    await s3.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: metaKey,
+      Body: JSON.stringify(updated, null, 2),
+      ContentType: "application/json; charset=utf-8",
+    }));
+
+    // Lambda を非同期起動（fire-and-forget）
+    await createLambdaClient().send(
       new InvokeCommand({
         FunctionName: functionName,
         InvocationType: "Event",

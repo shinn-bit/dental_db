@@ -285,6 +285,7 @@ def handler(event, _context):
         return {"status": "FAILED", "error": "fileId is required"}
 
     if not FITZ_AVAILABLE:
+        _fail_metadata(file_id, "PyMuPDF (fitz) is not installed in this Lambda")
         return {"status": "FAILED", "error": "PyMuPDF (fitz) is not installed in this Lambda"}
 
     # メタデータ取得
@@ -296,18 +297,27 @@ def handler(event, _context):
     # PDF のみ対応（DOCX は将来対応）
     content_type = metadata.get("contentType", "")
     if "pdf" not in content_type.lower():
+        metadata["imageProcessingStatus"] = "failed"
+        metadata["imageProcessingError"] = "PDF以外はスキップ（将来対応予定）"
+        save_metadata(metadata)
         return {"status": "SKIPPED", "fileId": file_id, "reason": "PDF以外はスキップ（将来対応予定）"}
 
     # PDF ダウンロード
     try:
         pdf_path = download_pdf(metadata["s3Key"])
     except Exception as e:
+        metadata["imageProcessingStatus"] = "failed"
+        metadata["imageProcessingError"] = f"PDFダウンロード失敗: {e}"
+        save_metadata(metadata)
         return {"status": "FAILED", "fileId": file_id, "error": f"PDFダウンロード失敗: {e}"}
 
     # 画像抽出・ラベル付け（context を渡してタイムアウト直前に安全停止）
     try:
         images = extract_images(pdf_path, file_id, context=_context)
     except Exception as e:
+        metadata["imageProcessingStatus"] = "failed"
+        metadata["imageProcessingError"] = f"画像抽出失敗: {e}"
+        save_metadata(metadata)
         return {"status": "FAILED", "fileId": file_id, "error": f"画像抽出失敗: {e}"}
     finally:
         try:
@@ -315,12 +325,19 @@ def handler(event, _context):
         except Exception:
             pass
 
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
     if not images:
+        metadata["imageProcessingStatus"] = "completed"
+        metadata["imageProcessingError"] = ""
+        metadata["imageProcessedAt"] = now
+        save_metadata(metadata)
         return {
             "status": "COMPLETED",
             "fileId": file_id,
             "imageCount": 0,
-            "message": "抽出できる画像がありませんでした（キャプションなし画像のみのページが画像中心でもなかった場合含む）",
+            "message": "抽出できる画像がありませんでした",
         }
 
     # KB ドキュメントに画像説明を追記
@@ -329,11 +346,11 @@ def handler(event, _context):
     except Exception as e:
         print(f"KB追記失敗（処理は続行）: {e}")
 
-    # メタデータ更新（既存フィールドは一切変更しない）
+    # メタデータ更新
     metadata["images"] = images
-    metadata["imageProcessedAt"] = __import__("datetime").datetime.now(
-        __import__("datetime").timezone.utc
-    ).isoformat().replace("+00:00", "Z")
+    metadata["imageProcessingStatus"] = "completed"
+    metadata["imageProcessingError"] = ""
+    metadata["imageProcessedAt"] = now
     save_metadata(metadata)
 
     caption_count = sum(1 for img in images if img["descriptionSource"] == "caption")
@@ -346,3 +363,14 @@ def handler(event, _context):
         "captionCount": caption_count,
         "visionCount": vision_count,
     }
+
+
+def _fail_metadata(file_id: str, error: str):
+    """エラー時にメタデータを更新（メタデータが取得できなかった場合は無視）"""
+    try:
+        metadata = get_metadata(file_id)
+        metadata["imageProcessingStatus"] = "failed"
+        metadata["imageProcessingError"] = error
+        save_metadata(metadata)
+    except Exception:
+        pass

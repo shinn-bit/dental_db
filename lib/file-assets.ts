@@ -31,6 +31,8 @@ export type StoredFileMetadata = {
   extractedTextLength?: number;
   textractJobId?: string;
   uploadedAt: string;
+  imageProcessingStatus?: "processing" | "completed" | "failed";
+  imageProcessingError?: string;
   imageProcessedAt?: string;
   images?: Array<{
     index: number;
