@@ -1,5 +1,6 @@
 import {
   RetrieveAndGenerateCommand,
+  RetrieveCommand,
   type RetrievalFilter
 } from "@aws-sdk/client-bedrock-agent-runtime";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
@@ -164,8 +165,13 @@ export async function POST(request: Request) {
   const queryText = `${message}${attachmentContext}`;
 
   try {
-    const response = await createBedrockAgentRuntimeClient().send(
-      new RetrieveAndGenerateCommand({
+    const bedrockClient = createBedrockAgentRuntimeClient();
+
+    // 回答生成と文書検索を並列実行
+    // RetrieveAndGenerateはカスタムpromptTemplate使用時にretrievedReferencesを返さないため
+    // RetrieveCommandで別途ソース文書を取得して画像引き出しに使う
+    const [response, retrieveResponse] = await Promise.all([
+      bedrockClient.send(new RetrieveAndGenerateCommand({
         ...(body.bedrockSessionId ? { sessionId: body.bedrockSessionId } : {}),
         input: { text: queryText },
         retrieveAndGenerateConfiguration: {
@@ -187,28 +193,31 @@ export async function POST(request: Request) {
             },
           },
         },
-      })
-    );
+      })),
+      bedrockClient.send(new RetrieveCommand({
+        knowledgeBaseId,
+        retrievalQuery: { text: queryText },
+        retrievalConfiguration: {
+          vectorSearchConfiguration: {
+            numberOfResults: 5,
+            ...(retrievalFilter ? { filter: retrievalFilter } : {}),
+          },
+        },
+      })).catch(() => ({ retrievalResults: [] as never[] })),
+    ]);
 
     const bucket = appEnv.s3BucketName;
-    const citationCount = (response.citations ?? []).length;
-    const refCount = (response.citations ?? []).reduce(
-      (n, c) => n + ((c as { retrievedReferences?: unknown[] }).retrievedReferences?.length ?? 0), 0
-    );
-    console.log(`[chat/images] bucket=${bucket ? "ok" : "EMPTY"} citations=${citationCount} refs=${refCount}`);
-    // 最初のcitationの生構造をダンプ（refs=0の原因調査）
-    if (citationCount > 0) {
-      const firstCitation = (response.citations ?? [])[0];
-      console.log("[chat/images] first citation keys:", Object.keys(firstCitation ?? {}).join(","));
-      console.log("[chat/images] first citation raw:", JSON.stringify(firstCitation).slice(0, 500));
-    }
+    console.log(`[chat/images] bucket=${bucket ? "ok" : "EMPTY"} citations=${(response.citations ?? []).length}`);
 
-    const images = bucket
-      ? await extractImagesFromCitations(
-          (response.citations ?? []) as Citation[],
-          bucket
-        ).catch((err) => {
-          console.error("[chat/images] extractImagesFromCitations failed:", String(err));
+    const retrievalResults = (retrieveResponse.retrievalResults ?? []) as Array<{
+      content?: { text?: string };
+      location?: { s3Location?: { uri?: string } };
+    }>;
+    console.log(`[chat/images] retrieveResults=${retrievalResults.length}`);
+
+    const images = bucket && retrievalResults.length > 0
+      ? await extractImagesFromRetrieveResults(retrievalResults, bucket).catch((err) => {
+          console.error("[chat/images] extractImagesFromRetrieveResults failed:", String(err));
           return [] as ChatImage[];
         })
       : [];
@@ -234,75 +243,68 @@ type ChatImage = {
   documentName: string;
 };
 
-type Citation = {
-  retrievedReferences?: Array<{
+// RetrieveCommand の結果から画像を抽出する
+// （カスタムpromptTemplate使用時はRetrieveAndGenerateのcitationsにretrievedReferencesが入らないため）
+// （カスタムpromptTemplate使用時はRetrieveAndGenerateのcitationsにretrievedReferencesが入らないため）
+async function extractImagesFromRetrieveResults(
+  retrievalResults: Array<{
     content?: { text?: string };
     location?: { s3Location?: { uri?: string } };
-  }>;
-};
-
-async function extractImagesFromCitations(
-  citations: Citation[],
+  }>,
   bucket: string
 ): Promise<ChatImage[]> {
   const s3 = createS3Client();
   const results: ChatImage[] = [];
   const processedDocIds = new Set<string>();
 
-  for (const citation of citations) {
-    for (const ref of citation.retrievedReferences ?? []) {
-      const uri = ref.location?.s3Location?.uri ?? "";
-      // kb/{id}.md の形式から id を抽出
-      const match = uri.match(/\/kb\/([^/]+)\.md$/);
-      if (!match) continue;
+  for (const ref of retrievalResults) {
+    const uri = ref.location?.s3Location?.uri ?? "";
+    const match = uri.match(/\/kb\/([^/]+)\.md$/);
+    if (!match) continue;
 
-      const docId = match[1];
-      if (processedDocIds.has(docId)) continue;
-      processedDocIds.add(docId);
+    const docId = match[1];
+    if (processedDocIds.has(docId)) continue;
+    processedDocIds.add(docId);
 
-      // メタデータを取得
-      try {
-        const metaRes = await s3.send(
-          new GetObjectCommand({ Bucket: bucket, Key: `${appEnv.s3MetadataPrefix}${docId}.json` })
+    try {
+      const metaRes = await s3.send(
+        new GetObjectCommand({ Bucket: bucket, Key: `${appEnv.s3MetadataPrefix}${docId}.json` })
+      );
+      const metaText = await metaRes.Body?.transformToString() ?? "{}";
+      const metadata = JSON.parse(metaText) as {
+        fileName?: string;
+        images?: Array<{ page: number; s3Key: string; description: string }>;
+      };
+
+      const docImages = metadata.images ?? [];
+      if (docImages.length === 0) continue;
+
+      // 参照テキスト内の「Nページ」パターンからページ番号を抽出
+      const retrievedText = ref.content?.text ?? "";
+      const mentionedPages = new Set<number>(
+        [...retrievedText.matchAll(/【(\d+)ページ/g)].map((m) => parseInt(m[1]))
+      );
+
+      const candidates = mentionedPages.size > 0
+        ? docImages.filter((img) => mentionedPages.has(img.page))
+        : docImages.slice(0, 2);
+
+      for (const img of candidates.slice(0, 3)) {
+        const url = await getSignedUrl(
+          s3,
+          new GetObjectCommand({ Bucket: bucket, Key: img.s3Key }),
+          { expiresIn: 3600 }
         );
-        const metaText = await metaRes.Body?.transformToString() ?? "{}";
-        const metadata = JSON.parse(metaText) as {
-          fileName?: string;
-          images?: Array<{ page: number; s3Key: string; description: string }>;
-        };
+        results.push({
+          url,
+          description: img.description,
+          page: img.page,
+          documentName: metadata.fileName ?? docId,
+        });
+        if (results.length >= 5) break;
+      }
+    } catch { continue; }
 
-        const docImages = metadata.images ?? [];
-        if (docImages.length === 0) continue;
-
-        // 参照テキスト内の「Nページ」パターンからページ番号を抽出
-        const retrievedText = ref.content?.text ?? "";
-        const mentionedPages = new Set<number>(
-          [...retrievedText.matchAll(/【(\d+)ページ/g)].map((m) => parseInt(m[1]))
-        );
-
-        // ページ番号が一致する画像を優先、なければドキュメント先頭の画像を使用
-        const candidates = mentionedPages.size > 0
-          ? docImages.filter((img) => mentionedPages.has(img.page))
-          : docImages.slice(0, 2);
-
-        for (const img of candidates.slice(0, 3)) {
-          const url = await getSignedUrl(
-            s3,
-            new GetObjectCommand({ Bucket: bucket, Key: img.s3Key }),
-            { expiresIn: 3600 }
-          );
-          results.push({
-            url,
-            description: img.description,
-            page: img.page,
-            documentName: metadata.fileName ?? docId,
-          });
-          if (results.length >= 5) break;
-        }
-      } catch { continue; }
-
-      if (results.length >= 5) break;
-    }
     if (results.length >= 5) break;
   }
 
