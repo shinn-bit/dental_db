@@ -41,6 +41,8 @@ MIN_CAPTION_CHARS = 15       # キャプションとみなす最小文字数
 IMAGE_HEAVY_THRESHOLD = 0.05 # テキスト密度がこれ未満 → 画像中心ページ
 MIN_IMAGE_DIMENSION = 50     # px 未満の画像（アイコン等）をスキップ
 MAX_IMAGE_BYTES = 4 * 1024 * 1024  # 4MB 超はスキップ
+MAX_VISION_CALLS = 30        # 1実行あたりのVision呼び出し上限（コスト・時間制御）
+TIMEOUT_BUFFER_MS = 60000    # Lambdaタイムアウト60秒前に処理を打ち切る
 
 # ── AWS クライアント ──────────────────────────────────────────────────────────
 
@@ -147,7 +149,7 @@ def describe_with_vision(img_bytes: bytes, media_type: str = "image/jpeg") -> st
 
 # ── 画像抽出メイン ────────────────────────────────────────────────────────────
 
-def extract_images(pdf_path: str, file_id: str) -> list[dict]:
+def extract_images(pdf_path: str, file_id: str, context=None) -> list[dict]:
     """
     PDF から画像を抽出し、各画像に説明文を関連付ける。
     戻り値: images[] フィールドに格納するリスト
@@ -155,8 +157,14 @@ def extract_images(pdf_path: str, file_id: str) -> list[dict]:
     doc = fitz.open(pdf_path)
     results = []
     image_index = 0
+    vision_call_count = 0
 
     for page_num in range(len(doc)):
+        # Lambda タイムアウト直前に安全停止
+        if context and context.get_remaining_time_in_millis() < TIMEOUT_BUFFER_MS:
+            print(f"タイムアウト直前のため {page_num + 1} ページ以降をスキップ（処理済み: {image_index} 枚）")
+            break
+
         page = doc[page_num]
         density = page_text_density(page)
         is_image_heavy = density < IMAGE_HEAVY_THRESHOLD
@@ -194,15 +202,20 @@ def extract_images(pdf_path: str, file_id: str) -> list[dict]:
             if len(caption) >= MIN_CAPTION_CHARS:
                 description = caption
                 source = "caption"
-            elif is_image_heavy:
-                # 画像中心ページ → Claude Vision フォールバック
+            elif is_image_heavy and vision_call_count < MAX_VISION_CALLS:
+                # 画像中心ページ → Claude Vision フォールバック（上限あり）
                 try:
                     description = describe_with_vision(img_bytes, media_type)
                     source = "vision"
+                    vision_call_count += 1
                 except Exception as e:
                     print(f"Vision失敗 p{page_num + 1} img{image_index}: {e}")
                     description = ""
                     source = "error"
+            elif is_image_heavy and vision_call_count >= MAX_VISION_CALLS:
+                # Vision上限超過 → 画像中心ページでもスキップ
+                print(f"Vision上限({MAX_VISION_CALLS}回)到達のためスキップ p{page_num + 1}")
+                continue
             else:
                 # キャプションなし + 通常ページ → スキップ
                 continue
@@ -291,9 +304,9 @@ def handler(event, _context):
     except Exception as e:
         return {"status": "FAILED", "fileId": file_id, "error": f"PDFダウンロード失敗: {e}"}
 
-    # 画像抽出・ラベル付け
+    # 画像抽出・ラベル付け（context を渡してタイムアウト直前に安全停止）
     try:
-        images = extract_images(pdf_path, file_id)
+        images = extract_images(pdf_path, file_id, context=_context)
     except Exception as e:
         return {"status": "FAILED", "fileId": file_id, "error": f"画像抽出失敗: {e}"}
     finally:
