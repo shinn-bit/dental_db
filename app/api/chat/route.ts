@@ -191,18 +191,22 @@ export async function POST(request: Request) {
     );
 
     const bucket = appEnv.s3BucketName;
+    const citationCount = (response.citations ?? []).length;
+    const refCount = (response.citations ?? []).reduce(
+      (n, c) => n + ((c as { retrievedReferences?: unknown[] }).retrievedReferences?.length ?? 0), 0
+    );
+    console.log(`[chat/images] bucket=${bucket ? "ok" : "EMPTY"} citations=${citationCount} refs=${refCount}`);
+
     const images = bucket
       ? await extractImagesFromCitations(
           (response.citations ?? []) as Citation[],
           bucket
         ).catch((err) => {
-          console.error("[chat/images] extractImagesFromCitations failed:", err);
+          console.error("[chat/images] extractImagesFromCitations failed:", String(err));
           return [] as ChatImage[];
         })
       : [];
-    if (images.length > 0) {
-      console.log(`[chat/images] ${images.length} images found for response`);
-    }
+    console.log(`[chat/images] result: ${images.length} images`);
 
     return NextResponse.json({
       answer: response.output?.text || "",
