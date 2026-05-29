@@ -403,20 +403,18 @@ async function generateSlidesInBatches(
   let completedCount = 0;
   onProgress(`スライドを生成中… 0 / ${totalSlides} 枚`);
 
-  const allSlides: string[] = [];
-  for (const { start, end } of batches) {
-    const batchSlides = await generateSlidesStreaming(
-      model,
-      contents,
-      buildPrompt(start, end),
-      () => {}
-    );
-    allSlides.push(...batchSlides);
-    completedCount += batchSlides.length;
-    onProgress(`スライドを生成中… ${completedCount} / ${totalSlides} 枚`);
-  }
+  const batchResults = await Promise.all(
+    batches.map(async ({ start, end }) => {
+      const batchSlides = await generateSlidesStreaming(
+        model, contents, buildPrompt(start, end), () => {}
+      );
+      completedCount += batchSlides.length;
+      onProgress(`スライドを生成中… ${completedCount} / ${totalSlides} 枚`);
+      return batchSlides;
+    })
+  );
 
-  return allSlides;
+  return batchResults.flat();
 }
 
 // ── Gemini contents builder ───────────────────────────────────────────────────
@@ -1084,18 +1082,21 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
 
   async function generateSlidesFromContent() {
     if (!content || !generatedTheme || loading) return;
+
+    // Wordセッションとは別に新しいスライドセッションを作成
+    sessionIdRef.current = crypto.randomUUID();
+    setCurrentSessionId(null);
     setLoading(true);
     setGeneratedOutputType("slide");
     setOutputType("slide");
     setEditSelectedSlides([]);
+    setSlidesHtml([]);
 
     const instruction = "このWordマニュアルの内容をもとにスライドを作成してください";
     const userMsg: ManualMessage = { role: "user", text: instruction };
-    const newHistory = [...messages, userMsg];
-    setMessages(newHistory);
+    setMessages([userMsg]);
 
     try {
-      // Word内容をdocContextとして渡す（RAG不要・構造化済みの内容を利用）
       const slideContents = buildContents(instruction, [], undefined, content);
       const slides = await generateSlidesInBatches(
         GEMINI_FLASH_MODEL,
@@ -1105,7 +1106,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
         setNotice
       );
       if (slides.length === 0) throw new Error("スライドの生成に失敗しました。再度お試しください。");
-      const finalMsgs = [...newHistory, { role: "model" as const, text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` }];
+      const finalMsgs: ManualMessage[] = [
+        userMsg,
+        { role: "model", text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` },
+      ];
       setSlidesHtml(slides);
       setMessages(finalMsgs);
       setNotice("");
@@ -1113,6 +1117,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
       setGeneratedOutputType("word");
+      setMessages([]);
     } finally {
       setLoading(false);
     }
