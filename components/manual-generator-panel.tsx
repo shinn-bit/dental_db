@@ -301,6 +301,116 @@ function buildSlideRegenSysPrompt(currentCount: number): string {
   ].join("\n");
 }
 
+// ── Slide batch generation ────────────────────────────────────────────────────
+
+const SLIDE_BATCH_DEFS = [
+  {
+    range: "1〜4",
+    sections: [
+      "===SLIDE_1===: タイトルスライド（ネイビー背景、テーマを大きく）",
+      "===SLIDE_2===: 1. 病気の解説",
+      "===SLIDE_3===: 2. 原因",
+      "===SLIDE_4===: 3. 病態・所見",
+    ],
+  },
+  {
+    range: "5〜8",
+    sections: [
+      "===SLIDE_5===: 4. 患者の訴え・臨床所見",
+      "===SLIDE_6===: 5. 当日の処置・応急処置",
+      "===SLIDE_7===: 6. 治療法",
+      "===SLIDE_8===: 7. 治療の具体的なステップ",
+    ],
+  },
+  {
+    range: "9〜12",
+    sections: [
+      "===SLIDE_9===:  8. 治療中に確認するチェックリスト（チェックボックス付き）",
+      "===SLIDE_10===: 9. 予後・術後のメンテナンス",
+      "===SLIDE_11===: 10. その他注意すべきこと",
+      "===SLIDE_12===: まとめ・重要ポイント",
+    ],
+  },
+];
+
+const SLIDE_BATCH_BASE_LINES = [
+  "【各スライドの仕様】",
+  ...SLIDE_SPEC_LINES,
+  "",
+  "【使えるビジュアル表現（自由に組み合わせてよい）】",
+  "SVGフローチャート / SVGタイムライン / SVG棒グラフ・円グラフ / 2カラム比較レイアウト",
+  "/ グリッドカード / HTMLテーブル / チェックリスト / SVGアイコン付き説明カード / SVG警告バナー",
+  "→ 同じ種類を連続して使わず、各スライドの内容に最も適したビジュアルを自律的に選ぶこと",
+  "→ テキストの羅列にしないこと。必ず何らかのビジュアル要素を含める",
+];
+
+function buildInitialBatchSysPrompt(batchIndex: number): string {
+  const { range, sections } = SLIDE_BATCH_DEFS[batchIndex];
+  const startN = batchIndex * 4 + 1;
+  const endN = startN + 3;
+  return [
+    "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
+    `ユーザーの指示に従い、歯科医院スタッフ向けプレゼンテーション（全12枚）のうち${range}枚目のHTMLスライド4枚を生成してください。`,
+    `【出力形式】各スライドを ===SLIDE_N===（N=${startN}〜${endN}）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。`,
+    "画像の取り扱い:",
+    "- 参考画像: 内容生成の参考としてください",
+    "- 埋め込み画像IMAGE_N: NをそのままINDEXに使い <div data-image=\"INDEX\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入する",
+    "",
+    ...SLIDE_BATCH_BASE_LINES,
+    "",
+    "【今回生成する4枚（この順番で出力）】",
+    ...sections,
+    "※各スライドの見出しには必ず番号と項目名を含めること。",
+  ].join("\n");
+}
+
+function buildRegenBatchSysPrompt(startN: number, endN: number, totalSlides: number): string {
+  const count = endN - startN + 1;
+  return [
+    "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
+    `ユーザーの指示に従い、全${totalSlides}枚のスライドのうち${startN}〜${endN}枚目の${count}枚を再生成してください。`,
+    `このバッチでは正確に${count}枚（===SLIDE_${startN}===〜===SLIDE_${endN}===）を出力してください。枚数を変えないこと。`,
+    `【出力形式】各スライドを ===SLIDE_N===（N=${startN}〜${endN}）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。`,
+    "画像の取り扱い:",
+    "- 参考画像: 内容生成の参考としてください",
+    "- 埋め込み画像IMAGE_N: NをそのままINDEXに使い <div data-image=\"INDEX\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入する",
+    "",
+    ...SLIDE_BATCH_BASE_LINES,
+  ].join("\n");
+}
+
+async function generateSlidesInBatches(
+  model: string,
+  contents: GeminiContent[],
+  totalSlides: number,
+  buildPrompt: (startN: number, endN: number) => string,
+  onProgress: (notice: string) => void
+): Promise<string[]> {
+  const batches: { start: number; end: number }[] = [];
+  for (let i = 1; i <= totalSlides; i += 4) {
+    batches.push({ start: i, end: Math.min(i + 3, totalSlides) });
+  }
+
+  let completedCount = 0;
+  onProgress(`スライドを生成中… 0 / ${totalSlides} 枚（${batches.length}バッチ並列）`);
+
+  const batchResults = await Promise.all(
+    batches.map(async ({ start, end }) => {
+      const slides = await generateSlidesStreaming(
+        model,
+        contents,
+        buildPrompt(start, end),
+        () => {}
+      );
+      completedCount += slides.length;
+      onProgress(`スライドを生成中… ${completedCount} / ${totalSlides} 枚`);
+      return slides;
+    })
+  );
+
+  return batchResults.flat();
+}
+
 // ── Gemini contents builder ───────────────────────────────────────────────────
 
 // 履歴なし・1ターン構成。編集時は docContext に現在のドキュメントを渡す。
@@ -889,18 +999,32 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
           setNotice("");
           saveSession({ msgs: finalMsgs, body: content, slides: updated, outType: currentOutputType, theme: generatedTheme });
         } else {
-          // ── 全スライド生成（ストリーミング）──────────────────────────────
+          // ── 全スライド生成 ─────────────────────────────────────────────
           setNotice("スライドを生成中…");
           const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
-          const slidePrompt = isFirstMessage
-            ? SLIDE_SYS_PROMPT
-            : buildSlideRegenSysPrompt(slidesHtml.length);
-          const slides = await generateSlidesStreaming(
-            GEMINI_FLASH_MODEL,
-            buildContents(augmentedText, pendingImages, resolvedDocs),
-            slidePrompt,
-            setNotice
-          );
+          const buildContentsOnce = buildContents(augmentedText, pendingImages, resolvedDocs);
+          const currentTotal = isFirstMessage ? 12 : slidesHtml.length;
+          const useBatch = isFirstMessage || currentTotal > 4;
+
+          let slides: string[];
+          if (useBatch) {
+            slides = await generateSlidesInBatches(
+              GEMINI_FLASH_MODEL,
+              buildContentsOnce,
+              currentTotal,
+              isFirstMessage
+                ? (startN, _endN) => buildInitialBatchSysPrompt(Math.floor((startN - 1) / 4))
+                : (startN, endN) => buildRegenBatchSysPrompt(startN, endN, currentTotal),
+              setNotice
+            );
+          } else {
+            slides = await generateSlidesStreaming(
+              GEMINI_FLASH_MODEL,
+              buildContentsOnce,
+              buildSlideRegenSysPrompt(currentTotal),
+              setNotice
+            );
+          }
           if (slides.length === 0) throw new Error("スライドの生成に失敗しました。再度お試しください。");
           const finalMsgs = [...newHistory, { role: "model" as const, text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` }];
           setSlidesHtml(slides);
