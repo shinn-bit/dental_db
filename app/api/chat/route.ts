@@ -285,9 +285,10 @@ async function extractImagesFromRetrieveResults(
         [...retrievedText.matchAll(/【(\d+)ページ/g)].map((m) => parseInt(m[1]))
       );
 
-      const candidates = mentionedPages.size > 0
-        ? docImages.filter((img) => mentionedPages.has(img.page))
-        : docImages.slice(0, 2);
+      // ページ番号が明示されている場合のみ表示（フォールバックなし）
+      // KB再同期後は kb/{id}.md の画像説明がインデックスされ自然にマッチする
+      if (mentionedPages.size === 0) continue;
+      const candidates = docImages.filter((img) => mentionedPages.has(img.page));
 
       for (const img of candidates.slice(0, 3)) {
         const url = await getSignedUrl(
