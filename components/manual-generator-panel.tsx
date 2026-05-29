@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
+const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
 const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -71,14 +72,18 @@ async function streamGenerate(
   contents: GeminiContent[],
   onChunk: (accumulated: string) => void
 ): Promise<void> {
-  const res = await fetch("/api/manual-stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model, systemPrompt, contents,
-      generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
-    }),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { maxOutputTokens: 65536, temperature: 0.3 },
+      }),
+    }
+  );
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => "");
     if (res.status === 503) throw new Error("Gemini APIが混雑しています。しばらく待ってから再試行してください。");
@@ -115,14 +120,18 @@ async function generateSlidesStreaming(
   systemPrompt: string,
   onProgress: (notice: string) => void
 ): Promise<string[]> {
-  const res = await fetch("/api/manual-stream", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model, systemPrompt, contents,
-      generationConfig: { maxOutputTokens: 65536, temperature: 0.4 },
-    }),
-  });
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?key=${GEMINI_API_KEY}&alt=sse`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        system_instruction: { parts: [{ text: systemPrompt }] },
+        contents,
+        generationConfig: { maxOutputTokens: 65536, temperature: 0.4 },
+      }),
+    }
+  );
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => "");
     if (res.status === 503) throw new Error("gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。");
