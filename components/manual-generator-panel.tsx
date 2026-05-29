@@ -925,9 +925,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
       setEditSelectedSlides([]);
     }
 
-    // 初回のみ院内資料をRAGで取得してコンテキストに注入
+    // 初回かつWord生成のみRAGを使用（スライドはトークン圧迫で500エラーになるため無効）
     let ragContext = "";
-    if (isFirstMessage && text.trim()) {
+    if (isFirstMessage && text.trim() && currentOutputType === "word") {
       try {
         setNotice("院内資料を検索中…");
         const ctxRes = await fetch("/api/manual-context", {
@@ -1070,6 +1070,42 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
       URL.revokeObjectURL(url);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "ダウンロードに失敗しました");
+    }
+  }
+
+  async function generateSlidesFromContent() {
+    if (!content || !generatedTheme || loading) return;
+    setLoading(true);
+    setGeneratedOutputType("slide");
+    setOutputType("slide");
+    setEditSelectedSlides([]);
+
+    const instruction = "このWordマニュアルの内容をもとにスライドを作成してください";
+    const userMsg: ManualMessage = { role: "user", text: instruction };
+    const newHistory = [...messages, userMsg];
+    setMessages(newHistory);
+
+    try {
+      // Word内容をdocContextとして渡す（RAG不要・構造化済みの内容を利用）
+      const slideContents = buildContents(instruction, [], undefined, content);
+      const slides = await generateSlidesInBatches(
+        GEMINI_FLASH_MODEL,
+        slideContents,
+        12,
+        (startN) => buildInitialBatchSysPrompt(Math.floor((startN - 1) / 4)),
+        setNotice
+      );
+      if (slides.length === 0) throw new Error("スライドの生成に失敗しました。再度お試しください。");
+      const finalMsgs = [...newHistory, { role: "model" as const, text: `スライドを${slides.length}枚生成しました。修正があればお知らせください。` }];
+      setSlidesHtml(slides);
+      setMessages(finalMsgs);
+      setNotice("");
+      saveSession({ msgs: finalMsgs, body: content, slides, outType: "slide", theme: generatedTheme });
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "生成に失敗しました");
+      setGeneratedOutputType("word");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -1534,9 +1570,14 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
           </span>
           <div className="row" style={{ gap: 6 }}>
             {!loading && generatedOutputType === "word" && content ? (
-              <Button variant="secondary" onClick={downloadDocx} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
-                <Download size={13} aria-hidden="true" />Word (.docx)
-              </Button>
+              <>
+                <Button variant="ghost" onClick={generateSlidesFromContent} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                  <Sparkles size={13} aria-hidden="true" />スライド化
+                </Button>
+                <Button variant="secondary" onClick={downloadDocx} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                  <Download size={13} aria-hidden="true" />Word (.docx)
+                </Button>
+              </>
             ) : null}
             {!loading && generatedOutputType === "slide" && slidesHtml.length > 0 ? (
               <>
