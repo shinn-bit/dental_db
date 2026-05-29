@@ -196,6 +196,12 @@ export async function POST(request: Request) {
       (n, c) => n + ((c as { retrievedReferences?: unknown[] }).retrievedReferences?.length ?? 0), 0
     );
     console.log(`[chat/images] bucket=${bucket ? "ok" : "EMPTY"} citations=${citationCount} refs=${refCount}`);
+    // 最初のcitationの生構造をダンプ（refs=0の原因調査）
+    if (citationCount > 0) {
+      const firstCitation = (response.citations ?? [])[0];
+      console.log("[chat/images] first citation keys:", Object.keys(firstCitation ?? {}).join(","));
+      console.log("[chat/images] first citation raw:", JSON.stringify(firstCitation).slice(0, 500));
+    }
 
     const images = bucket
       ? await extractImagesFromCitations(
