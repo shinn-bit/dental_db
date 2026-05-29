@@ -392,23 +392,22 @@ async function generateSlidesInBatches(
   }
 
   let completedCount = 0;
-  onProgress(`スライドを生成中… 0 / ${totalSlides} 枚（${batches.length}バッチ並列）`);
+  onProgress(`スライドを生成中… 0 / ${totalSlides} 枚`);
 
-  const batchResults = await Promise.all(
-    batches.map(async ({ start, end }) => {
-      const slides = await generateSlidesStreaming(
-        model,
-        contents,
-        buildPrompt(start, end),
-        () => {}
-      );
-      completedCount += slides.length;
-      onProgress(`スライドを生成中… ${completedCount} / ${totalSlides} 枚`);
-      return slides;
-    })
-  );
+  const allSlides: string[] = [];
+  for (const { start, end } of batches) {
+    const batchSlides = await generateSlidesStreaming(
+      model,
+      contents,
+      buildPrompt(start, end),
+      () => {}
+    );
+    allSlides.push(...batchSlides);
+    completedCount += batchSlides.length;
+    onProgress(`スライドを生成中… ${completedCount} / ${totalSlides} 枚`);
+  }
 
-  return batchResults.flat();
+  return allSlides;
 }
 
 // ── Gemini contents builder ───────────────────────────────────────────────────
