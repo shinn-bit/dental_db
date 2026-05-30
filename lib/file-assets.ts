@@ -131,7 +131,11 @@ export function normalizeFileMetadata(input: FileMetadataInput): StoredFileMetad
     extractedTextKey: input.extractedTextKey || "",
     extractedTextLength: input.extractedTextLength || 0,
     textractJobId: input.textractJobId || "",
-    uploadedAt: input.uploadedAt || new Date().toISOString()
+    uploadedAt: input.uploadedAt || new Date().toISOString(),
+    imageProcessingStatus: input.imageProcessingStatus,
+    imageProcessingError: input.imageProcessingError || "",
+    imageProcessedAt: input.imageProcessedAt,
+    images: input.images,
   };
 }
 
