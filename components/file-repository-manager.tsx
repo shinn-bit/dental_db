@@ -104,7 +104,6 @@ export function FileRepositoryManager() {
   const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
   const [blockedSummaryId, setBlockedSummaryId] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
-  const [imageGallery, setImageGallery] = useState<{ file: RepositoryFile; images: { index: number; page: number; description: string; url: string }[] } | null>(null);
 
   // Load from localStorage on mount
   useEffect(() => {
@@ -347,17 +346,6 @@ export function FileRepositoryManager() {
     }
   }
 
-  async function openImages(file: RepositoryFile) {
-    setNotice("");
-    try {
-      const res = await fetch(`/api/files/${file.id}/images`);
-      const data = (await res.json()) as { images?: { index: number; page: number; description: string; url: string }[]; error?: string };
-      if (!res.ok) throw new Error(data.error || "画像の取得に失敗しました。");
-      setImageGallery({ file, images: data.images ?? [] });
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "画像の取得に失敗しました。");
-    }
-  }
 
   async function saveSummary() {
     if (!selectedSummary) return;
@@ -597,7 +585,7 @@ export function FileRepositoryManager() {
             />
             <div style={{ overflowY: "auto", minHeight: 0, borderLeft: "1px solid var(--line)" }}>
               {searching ? (
-                <SearchResults hits={searchHits} onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile} onProcessImages={processImages} onOpenImages={openImages} query={libQuery} summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} drag={dragCtx} />
+                <SearchResults hits={searchHits} onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile} onProcessImages={processImages} query={libQuery} summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} drag={dragCtx} />
               ) : !cat ? (
                 <CategoryGrid
                   library={library}
@@ -612,8 +600,7 @@ export function FileRepositoryManager() {
                   onDetail={openDetail}
                   onDeleteFile={deleteFile}
                   onProcessImages={processImages}
-                  onOpenImages={openImages}
-                  summaryProcessingId={summaryProcessingId}
+                                   summaryProcessingId={summaryProcessingId}
                   blockedSummaryId={blockedSummaryId}
                   deletingId={deletingId}
                  
@@ -637,8 +624,7 @@ export function FileRepositoryManager() {
                   onDetail={openDetail}
                   onDelete={deleteFile}
                   onProcessImages={processImages}
-                  onOpenImages={openImages}
-                  summaryProcessingId={summaryProcessingId}
+                                   summaryProcessingId={summaryProcessingId}
                   blockedSummaryId={blockedSummaryId}
                   deletingId={deletingId}
                  
@@ -651,9 +637,6 @@ export function FileRepositoryManager() {
       </div>
 
       {/* ── Overlays ── */}
-      {imageGallery ? (
-        <ImageGalleryOverlay gallery={imageGallery} onClose={() => setImageGallery(null)} />
-      ) : null}
       {selectedDetail && detailDraft ? (
         <DetailOverlay file={selectedDetail} draft={detailDraft} saving={detailSaving} library={library} onDraft={setDetailDraft} onSave={saveDetail} onOpenSource={() => setSourceViewerFile(selectedDetail)} onClose={() => setSelectedDetail(null)} />
       ) : null}
@@ -799,7 +782,7 @@ function TreeNode({ label, count, active, onClick, chevron, onChevron, indent = 
 }
 
 // ── Category grid (root) ────────────────────────────────────────
-function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag, unassignedFiles, onOpenSummary, onDetail, onDeleteFile, onProcessImages, onOpenImages, summaryProcessingId, blockedSummaryId, deletingId }: {
+function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag, unassignedFiles, onOpenSummary, onDetail, onDeleteFile, onProcessImages,summaryProcessingId, blockedSummaryId, deletingId }: {
   library: LibraryCategory[];
   onPick: (c: LibraryCategory) => void;
   onAdd: (label: string) => void;
@@ -812,7 +795,6 @@ function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCateg
   onDetail: (f: RepositoryFile) => void;
   onDeleteFile: (f: RepositoryFile) => void;
   onProcessImages: (f: RepositoryFile) => void;
-  onOpenImages: (f: RepositoryFile) => void;
   summaryProcessingId: string | null;
   blockedSummaryId: string | null;
   deletingId: string | null;
@@ -840,7 +822,7 @@ function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCateg
               <DraggableFileCard
                 key={f.id} file={f} drag={drag}
                 onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDeleteFile}
-                onProcessImages={onProcessImages} onOpenImages={onOpenImages}
+                onProcessImages={onProcessImages}
                 summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
               />
             ))}
@@ -1051,7 +1033,6 @@ type FileGridCommonProps = {
   onDetail: (f: RepositoryFile) => void;
   onDelete: (f: RepositoryFile) => void;
   onProcessImages: (f: RepositoryFile) => void;
-  onOpenImages: (f: RepositoryFile) => void;
   summaryProcessingId: string | null;
   blockedSummaryId: string | null;
   deletingId: string | null;
@@ -1113,7 +1094,7 @@ function SearchResults({ hits, query, ...props }: FileGridCommonProps & { hits: 
   );
 }
 
-function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail, onDelete, onProcessImages, onOpenImages }: FileGridCommonProps & { file: RepositoryFile; processing?: boolean; blocked?: boolean; deleting?: boolean }) {
+function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail, onDelete, onProcessImages }: FileGridCommonProps & { file: RepositoryFile; processing?: boolean; blocked?: boolean; deleting?: boolean }) {
   const needsOcr = file.textExtractionStatus === "ocr_required";
   const canSummary = file.preparationStatus === "completed";
   const summaryInProgress = file.summaryStatus === "processing" || processing;
@@ -1156,11 +1137,6 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
         <Button variant={file.summaryStatus === "completed" ? "secondary" : canSummary ? "primary" : "secondary"} size="sm" style={{ flex: 1, opacity: canSummary || file.summaryStatus === "completed" ? 1 : 0.58 }} disabled={!!summaryInProgress} onClick={() => onOpenSummary(file)}>
           {summaryInProgress ? "要約作成中" : file.summaryStatus === "completed" ? "要約を見る" : "要約をつくる"}
         </Button>
-        {file.imageCount > 0 ? (
-          <Button variant="ghost" size="sm" onClick={() => onOpenImages(file)} title={`${file.imageCount}枚の画像`}>
-            <Images size={13} aria-hidden="true" />{file.imageCount}枚
-          </Button>
-        ) : null}
         <Button variant="ghost" size="sm" onClick={() => onDetail(file)}><Edit size={13} aria-hidden="true" />詳細</Button>
         <button type="button" className="btn ghost sm icon" title="削除" disabled={!!deleting} onClick={() => onDelete(file)}><Trash2 size={13} aria-hidden="true" /></button>
       </div>
@@ -1173,7 +1149,7 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
   );
 }
 
-function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deletingId,  onOpenSummary, onDetail, onDelete, onProcessImages, onOpenImages, drag }: FileGridCommonProps & { file: RepositoryFile }) {
+function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deletingId,  onOpenSummary, onDetail, onDelete, onProcessImages,drag }: FileGridCommonProps & { file: RepositoryFile }) {
   return (
     <div draggable onDragStart={(e) => { drag.setDraggedId(file.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", file.id); }}
       onDragEnd={() => { drag.setDraggedId(null); drag.setDropTarget(null); }}
@@ -1184,7 +1160,7 @@ function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deleti
         blocked={blockedSummaryId === file.id}
         deleting={deletingId === file.id}
         onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDelete}
-        onProcessImages={onProcessImages} onOpenImages={onOpenImages}
+        onProcessImages={onProcessImages}
         summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
       />
     </div>
@@ -1368,19 +1344,20 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [onClose]);
 
-  // 画像ギャラリー
+  // 画像ギャラリー（デフォルト非表示）
+  const [showImages, setShowImages] = useState(false);
   const [detailImages, setDetailImages] = useState<{ index: number; page: number; description: string; url: string }[]>([]);
   const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
 
   useEffect(() => {
-    if (file.imageCount === 0) return;
+    if (!showImages || file.imageCount === 0 || detailImages.length > 0) return;
     fetch(`/api/files/${file.id}/images`)
       .then(r => r.json())
       .then((d: { images?: { index: number; page: number; description: string; url: string }[] }) => {
         setDetailImages(d.images ?? []);
       })
       .catch(() => {});
-  }, [file.id, file.imageCount]);
+  }, [showImages, file.id, file.imageCount, detailImages.length]);
 
   const selectedCat = library.find((c) => c.id === draft.catId);
 
@@ -1430,20 +1407,27 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
             <MetaRow label="要約" value={file.summaryStatus === "completed" ? "作成済み" : file.summaryStatus || "未作成"} />
             <MetaRow label="OCR" value={file.textExtractionStatus || "未開始"} />
             {file.contentType.includes("pdf") ? (
-              <MetaRow
-                label="画像処理"
-                value={
-                  file.imageProcessingStatus === "completed" ? `完了 ${file.imageCount}枚` :
-                  file.imageProcessingStatus === "processing" ? "処理中…" :
-                  file.imageProcessingStatus === "failed" ? "失敗" :
-                  "未処理"
-                }
-              />
+              <div style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
+                <dt className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.1em", paddingTop: 2 }}>画像処理</dt>
+                <dd style={{ margin: 0 }}>
+                  {file.imageProcessingStatus === "completed" && file.imageCount > 0 ? (
+                    <button type="button" onClick={() => setShowImages(v => !v)}
+                      style={{ background: "none", border: "none", cursor: "pointer", color: "var(--navy)", fontSize: 12.5, fontWeight: 600, padding: 0, textDecoration: "underline" }}>
+                      {showImages ? "▲ 閉じる" : `▶ ${file.imageCount}枚を見る`}
+                    </button>
+                  ) : (
+                    <span style={{ fontSize: 12.5, color: "var(--ink)" }}>
+                      {file.imageProcessingStatus === "processing" ? "処理中…" :
+                       file.imageProcessingStatus === "failed" ? "失敗" : "未処理"}
+                    </span>
+                  )}
+                </dd>
+              </div>
             ) : null}
           </div>
 
-          {/* 画像ギャラリー */}
-          {detailImages.length > 0 ? (
+          {/* 画像ギャラリー（showImages=trueのときのみ表示） */}
+          {showImages && detailImages.length > 0 ? (
             <div style={{ marginTop: 20, borderTop: "1px solid var(--line-soft)", paddingTop: 16 }}>
               <div className="tiny" style={{ letterSpacing: "0.14em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 10 }}>
                 資料内の画像（{detailImages.length}枚）
