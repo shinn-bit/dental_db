@@ -257,10 +257,13 @@ async function extractImagesFromRetrieveResults(
   const results: ChatImage[] = [];
   const processedDocIds = new Set<string>();
 
-  // 質問から検索キーワードを抽出（2文字以上）
-  const queryKeywords = Array.from(
-    new Set(query.replace(/[　！？。、・「」【】（）]/g, " ").split(/\s+/).filter(w => w.length >= 2))
-  );
+  // 日本語はスペース区切りがないのでN-gram（3〜6文字）で部分文字列を抽出
+  const cleaned = query.replace(/[　！？。、・「」【】（）\s]/g, "");
+  const queryKeywords = Array.from(new Set(
+    [3, 4, 5, 6].flatMap(n =>
+      Array.from({ length: Math.max(0, cleaned.length - n + 1) }, (_, i) => cleaned.slice(i, i + n))
+    )
+  ));
 
   for (const ref of retrievalResults) {
     const uri = ref.location?.s3Location?.uri ?? "";
