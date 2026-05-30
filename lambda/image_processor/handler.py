@@ -38,6 +38,10 @@ BEDROCK_MODEL_ARN = os.environ.get("BEDROCK_MODEL_ARN", "")
 BEDROCK_VISION_MODEL_ARN = os.environ.get("BEDROCK_VISION_MODEL_ARN") or BEDROCK_MODEL_ARN
 
 MIN_CAPTION_CHARS = 15       # キャプションとみなす最小文字数
+SKIP_DESCRIPTION_WORDS = [   # 表紙・目次など不要ページの除外キーワード
+    "表紙", "目次", "はじめに", "前書き", "まえがき", "序文",
+    "Contents", "Table of", "索引", "奥付",
+]
 IMAGE_HEAVY_THRESHOLD = 0.05 # テキスト密度がこれ未満 → 画像中心ページ
 MIN_IMAGE_DIMENSION = 50     # px 未満の画像（アイコン等）をスキップ
 MAX_IMAGE_BYTES = 4 * 1024 * 1024  # 4MB 超はスキップ
@@ -221,6 +225,11 @@ def extract_images(pdf_path: str, file_id: str, context=None) -> list[dict]:
                 continue
 
             if not description:
+                continue
+
+            # 表紙・目次・前書き等は除外
+            if any(w in description for w in SKIP_DESCRIPTION_WORDS):
+                print(f"スキップ（表紙/目次等）: p{page_num + 1} img{image_index}")
                 continue
 
             # S3 に画像保存

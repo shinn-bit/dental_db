@@ -287,8 +287,14 @@ async function extractImagesFromRetrieveResults(
       const docImages = metadata.images ?? [];
       if (docImages.length === 0) continue;
 
+      // 表紙・目次・前書き等は除外
+      const SKIP_WORDS = ["表紙", "目次", "はじめに", "前書き", "まえがき", "序文", "Contents", "Table of"];
+      const contentImages = docImages.filter(
+        img => !SKIP_WORDS.some(w => img.description.includes(w))
+      );
+
       // 画像説明にキーワードが含まれるものをスコアリング
-      const scored = docImages
+      const scored = contentImages
         .map(img => ({
           img,
           score: queryKeywords.filter(kw => img.description.includes(kw)).length,
