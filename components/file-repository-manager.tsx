@@ -1368,6 +1368,20 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [onClose]);
 
+  // 画像ギャラリー
+  const [detailImages, setDetailImages] = useState<{ index: number; page: number; description: string; url: string }[]>([]);
+  const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (file.imageCount === 0) return;
+    fetch(`/api/files/${file.id}/images`)
+      .then(r => r.json())
+      .then((d: { images?: { index: number; page: number; description: string; url: string }[] }) => {
+        setDetailImages(d.images ?? []);
+      })
+      .catch(() => {});
+  }, [file.id, file.imageCount]);
+
   const selectedCat = library.find((c) => c.id === draft.catId);
 
   function handleCatChange(catId: string) {
@@ -1377,7 +1391,7 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 820, background: "var(--panel)", borderRadius: 16, overflow: "hidden", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease", maxHeight: "calc(100vh - 64px)", display: "flex", flexDirection: "column" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 920, background: "var(--panel)", borderRadius: 16, overflow: "hidden", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease", maxHeight: "calc(100vh - 64px)", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 18, alignItems: "center", padding: "20px 24px", borderBottom: "1px solid var(--line)", background: "var(--panel-deep)" }}>
           <FilePreview file={file} />
           <div className="stack" style={{ minWidth: 0 }}>
@@ -1427,6 +1441,53 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
               />
             ) : null}
           </div>
+
+          {/* 画像ギャラリー */}
+          {detailImages.length > 0 ? (
+            <div style={{ marginTop: 20, borderTop: "1px solid var(--line-soft)", paddingTop: 16 }}>
+              <div className="tiny" style={{ letterSpacing: "0.14em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 10 }}>
+                資料内の画像（{detailImages.length}枚）
+              </div>
+              {/* サムネイルグリッド */}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {detailImages.map((img, i) => (
+                  <button
+                    key={i} type="button"
+                    onClick={() => setSelectedImgIndex(selectedImgIndex === i ? null : i)}
+                    style={{
+                      border: `2px solid ${selectedImgIndex === i ? "var(--navy)" : "var(--line)"}`,
+                      borderRadius: 8, padding: 0, background: "none", cursor: "pointer",
+                      overflow: "hidden", flexShrink: 0,
+                    }}
+                  >
+                    <img src={img.url} alt={`p.${img.page}`}
+                      style={{ width: 80, height: 64, objectFit: "cover", display: "block" }} />
+                    <div style={{ fontSize: 9, color: "var(--ink-muted)", padding: "2px 4px", textAlign: "center" }}>
+                      p.{img.page}
+                    </div>
+                  </button>
+                ))}
+              </div>
+              {/* 選択した画像の拡大表示 */}
+              {selectedImgIndex !== null && detailImages[selectedImgIndex] ? (
+                <div style={{ marginTop: 12, border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
+                  <img
+                    src={detailImages[selectedImgIndex].url}
+                    alt={detailImages[selectedImgIndex].description}
+                    style={{ width: "100%", maxHeight: 360, objectFit: "contain", display: "block", background: "#f8f9fa" }}
+                  />
+                  <div style={{ padding: "10px 14px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)" }}>
+                    <div className="tiny soft" style={{ marginBottom: 4 }}>
+                      {detailImages[selectedImgIndex].page}ページ目
+                    </div>
+                    <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.7 }}>
+                      {detailImages[selectedImgIndex].description}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div style={{ padding: "14px 24px", borderTop: "1px solid var(--line)", background: "var(--panel-deep)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <Button variant="secondary" onClick={onClose}>閉じる</Button>
