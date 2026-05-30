@@ -82,7 +82,7 @@ export function FileRepositoryManager() {
   const [draggedId, setDraggedId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ cat: string; sub: string | null } | null>(null);
   const [destCat, setDestCat] = useState(DEFAULT_LIBRARY[0]?.id || "");
-  const [destSub, setDestSub] = useState(DEFAULT_LIBRARY[0]?.subs[0]?.id || "");
+  const [destSub, setDestSub] = useState("");  // サブフォルダは省略可能（カテゴリ直属）
 
   // Files
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -190,6 +190,19 @@ export function FileRepositoryManager() {
       const data = (await res.json()) as { files: StoredFileMetadata[] };
       const mapped = data.files.map(toRepositoryFile);
       setFiles(mapped);
+      // S3メタデータのcatId/subIdをassignmentsに反映（localStorage優先、未設定時のみ補完）
+      setAssignmentsState((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const raw of data.files) {
+          if (raw.catId && !next[raw.id]) {
+            next[raw.id] = { catId: raw.catId, subId: raw.subId ?? null };
+            changed = true;
+          }
+        }
+        if (changed) writeAssignments(next);
+        return next;
+      });
       // 準備完了済みPDFで未処理のものを自動的に画像処理起動
       for (const f of mapped) {
         if (f.preparationStatus === "completed" && f.contentType.includes("pdf") && !f.imageProcessingStatus) {
@@ -261,7 +274,8 @@ export function FileRepositoryManager() {
             size: file.size, sizeLabel: formatFileSize(file.size),
             thumbnailLabel: getThumbnailLabel(file.name),
             memo: memo.trim(),
-            uploadedAt: new Date().toISOString()
+            uploadedAt: new Date().toISOString(),
+            ...(destCat ? { catId: destCat, subId: destSub || null } : {})
           })
         });
         if (!metaRes.ok) throw new Error("Failed to save metadata");
@@ -441,16 +455,9 @@ export function FileRepositoryManager() {
     return false;
   });
 
-  // カテゴリ直属ファイル（catId あり・subId なし または無効なsubId）
-  function filesDirectlyInCategory(catId: string): RepositoryFile[] {
-    return files.filter((f) => {
-      const a = assignments[f.id];
-      if (!a || a.catId !== catId) return false;
-      const cat = library.find((c) => c.id === catId);
-      if (!cat) return false;
-      // subId が未設定または存在しないサブフォルダを指している
-      return !a.subId || !cat.subs.find((s) => s.id === a.subId);
-    });
+  // カテゴリ内の全ファイル（サブフォルダに関係なく catId が一致するもの全部）
+  function filesInCategoryAll(catId: string): RepositoryFile[] {
+    return files.filter((f) => assignments[f.id]?.catId === catId);
   }
 
   const currentCat = library.find((c) => c.id === destCat);
@@ -627,17 +634,17 @@ export function FileRepositoryManager() {
                     filesInFolder={filesInFolder}
                     drag={dragCtx}
                   />
-                  {filesDirectlyInCategory(cat!.id).length > 0 ? (
+                  {filesInCategoryAll(cat!.id).length > 0 ? (
                     <div style={{ padding: "0 20px 20px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
                         <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
                         <span className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.12em", fontWeight: 600, whiteSpace: "nowrap" }}>
-                          {cat!.label} 直属 ({filesDirectlyInCategory(cat!.id).length} 件)
+                          {cat!.label} の資料 ({filesInCategoryAll(cat!.id).length} 件)
                         </span>
                         <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-                        {filesDirectlyInCategory(cat!.id).map((f) => (
+                        {filesInCategoryAll(cat!.id).map((f) => (
                           <DraggableFileCard key={f.id} file={f} drag={dragCtx}
                             onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile}
                             onProcessImages={processImages}

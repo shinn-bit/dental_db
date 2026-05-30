@@ -31,6 +31,8 @@ export type StoredFileMetadata = {
   extractedTextLength?: number;
   textractJobId?: string;
   uploadedAt: string;
+  catId?: string;
+  subId?: string | null;
   imageProcessingStatus?: "processing" | "completed" | "failed";
   imageProcessingError?: string;
   imageProcessedAt?: string;
@@ -132,6 +134,8 @@ export function normalizeFileMetadata(input: FileMetadataInput): StoredFileMetad
     extractedTextLength: input.extractedTextLength || 0,
     textractJobId: input.textractJobId || "",
     uploadedAt: input.uploadedAt || new Date().toISOString(),
+    catId: input.catId,
+    subId: input.subId,
     imageProcessingStatus: input.imageProcessingStatus,
     imageProcessingError: input.imageProcessingError || "",
     imageProcessedAt: input.imageProcessedAt,
