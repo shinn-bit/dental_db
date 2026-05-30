@@ -189,7 +189,14 @@ export function FileRepositoryManager() {
       const res = await fetch("/api/files", { cache: "no-store" });
       if (!res.ok) throw new Error("S3一覧を読み込めませんでした。");
       const data = (await res.json()) as { files: StoredFileMetadata[] };
-      setFiles(data.files.map(toRepositoryFile));
+      const mapped = data.files.map(toRepositoryFile);
+      setFiles(mapped);
+      // 準備完了済みPDFで未処理のものを自動的に画像処理起動
+      for (const f of mapped) {
+        if (f.preparationStatus === "completed" && f.contentType.includes("pdf") && !f.imageProcessingStatus) {
+          fetch(`/api/files/${f.id}/process-images`, { method: "POST" }).catch(() => {});
+        }
+      }
     } catch (error) {
       if (opts.updateNotice !== false) {
         setNotice(error instanceof Error ? error.message : "S3一覧を読み込めませんでした。");
@@ -1149,25 +1156,10 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
         <Button variant={file.summaryStatus === "completed" ? "secondary" : canSummary ? "primary" : "secondary"} size="sm" style={{ flex: 1, opacity: canSummary || file.summaryStatus === "completed" ? 1 : 0.58 }} disabled={!!summaryInProgress} onClick={() => onOpenSummary(file)}>
           {summaryInProgress ? "要約作成中" : file.summaryStatus === "completed" ? "要約を見る" : "要約をつくる"}
         </Button>
-        {canProcessImages ? (
-          file.imageCount > 0 ? (
-            <Button variant="ghost" size="sm" onClick={() => onOpenImages(file)} title={`${file.imageCount}枚の画像`}>
-              <Images size={13} aria-hidden="true" />{file.imageCount}枚
-            </Button>
-          ) : imageProcessing ? (
-            <Button variant="ghost" size="sm" disabled>
-              <RefreshCw size={13} aria-hidden="true" style={{ animation: "spin 1s linear infinite" }} />処理中…
-            </Button>
-          ) : imageFailed ? (
-            <Button variant="ghost" size="sm" title={file.imageProcessingError || "処理に失敗しました"} onClick={() => onProcessImages(file)}
-              style={{ color: "var(--warn)" }}>
-              <Images size={13} aria-hidden="true" />再処理
-            </Button>
-          ) : (
-            <Button variant="ghost" size="sm" onClick={() => onProcessImages(file)} title="画像を抽出してRAGに登録">
-              <Images size={13} aria-hidden="true" />画像処理
-            </Button>
-          )
+        {file.imageCount > 0 ? (
+          <Button variant="ghost" size="sm" onClick={() => onOpenImages(file)} title={`${file.imageCount}枚の画像`}>
+            <Images size={13} aria-hidden="true" />{file.imageCount}枚
+          </Button>
         ) : null}
         <Button variant="ghost" size="sm" onClick={() => onDetail(file)}><Edit size={13} aria-hidden="true" />詳細</Button>
         <button type="button" className="btn ghost sm icon" title="削除" disabled={!!deleting} onClick={() => onDelete(file)}><Trash2 size={13} aria-hidden="true" /></button>
@@ -1419,10 +1411,21 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
             <FieldLabel>メモ</FieldLabel>
             <textarea className="textarea" value={draft.memo} placeholder="資料の補足、運用メモなど" style={{ minHeight: 110 }} onChange={(e) => onDraft((cur) => cur ? { ...cur, memo: e.target.value } : cur)} />
           </div>
-          <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+          <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
             <MetaRow label="AI参照" value={file.preparationStatus === "completed" ? "可" : file.preparationStatus || "未開始"} />
             <MetaRow label="要約" value={file.summaryStatus === "completed" ? "作成済み" : file.summaryStatus || "未作成"} />
             <MetaRow label="OCR" value={file.textExtractionStatus || "未開始"} />
+            {file.contentType.includes("pdf") ? (
+              <MetaRow
+                label="画像処理"
+                value={
+                  file.imageProcessingStatus === "completed" ? `完了 ${file.imageCount}枚` :
+                  file.imageProcessingStatus === "processing" ? "処理中…" :
+                  file.imageProcessingStatus === "failed" ? "失敗" :
+                  "未処理"
+                }
+              />
+            ) : null}
           </div>
         </div>
         <div style={{ padding: "14px 24px", borderTop: "1px solid var(--line)", background: "var(--panel-deep)", display: "flex", justifyContent: "flex-end", gap: 8 }}>
