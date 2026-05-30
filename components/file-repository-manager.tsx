@@ -434,13 +434,24 @@ export function FileRepositoryManager() {
   const filesInSub = sub && cat ? files.filter((f) => assignments[f.id]?.catId === cat.id && assignments[f.id]?.subId === sub.id) : [];
   const unassignedFiles = files.filter((f) => {
     const a = assignments[f.id];
-    if (!a) return true;
+    if (!a || !a.catId) return true;
+    // catId が有効なカテゴリなら「カテゴリ直属」として未整理から除外
     const assignedCat = library.find((c) => c.id === a.catId);
     if (!assignedCat) return true;
-    if (!a.subId) return true;
-    if (!assignedCat.subs.find((s) => s.id === a.subId)) return true;
     return false;
   });
+
+  // カテゴリ直属ファイル（catId あり・subId なし または無効なsubId）
+  function filesDirectlyInCategory(catId: string): RepositoryFile[] {
+    return files.filter((f) => {
+      const a = assignments[f.id];
+      if (!a || a.catId !== catId) return false;
+      const cat = library.find((c) => c.id === catId);
+      if (!cat) return false;
+      // subId が未設定または存在しないサブフォルダを指している
+      return !a.subId || !cat.subs.find((s) => s.id === a.subId);
+    });
+  }
 
   const currentCat = library.find((c) => c.id === destCat);
 
@@ -606,15 +617,37 @@ export function FileRepositoryManager() {
                  
                 />
               ) : !sub ? (
-                <SubcategoryView
-                  cat={cat}
-                  onPick={(s) => setPath([cat!.id, s.id])}
-                  onAdd={(label) => addSub(cat!.id, label)}
-                  onRename={(subId, label) => renameSub(cat!.id, subId, label)}
-                  onDelete={(subId) => deleteSub(cat!.id, subId)}
-                  filesInFolder={filesInFolder}
-                  drag={dragCtx}
-                />
+                <>
+                  <SubcategoryView
+                    cat={cat}
+                    onPick={(s) => setPath([cat!.id, s.id])}
+                    onAdd={(label) => addSub(cat!.id, label)}
+                    onRename={(subId, label) => renameSub(cat!.id, subId, label)}
+                    onDelete={(subId) => deleteSub(cat!.id, subId)}
+                    filesInFolder={filesInFolder}
+                    drag={dragCtx}
+                  />
+                  {filesDirectlyInCategory(cat!.id).length > 0 ? (
+                    <div style={{ padding: "0 20px 20px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                        <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+                        <span className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.12em", fontWeight: 600, whiteSpace: "nowrap" }}>
+                          {cat!.label} 直属 ({filesDirectlyInCategory(cat!.id).length} 件)
+                        </span>
+                        <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
+                        {filesDirectlyInCategory(cat!.id).map((f) => (
+                          <DraggableFileCard key={f.id} file={f} drag={dragCtx}
+                            onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile}
+                            onProcessImages={processImages}
+                            summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+                </>
               ) : (
                 <FileGrid
                   cat={cat}
