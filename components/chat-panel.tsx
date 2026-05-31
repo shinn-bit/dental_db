@@ -3,12 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, MessageCircle, MoreHorizontal, Paperclip, Plus, Send, Wrench, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, LayoutTemplate, MessageCircle, MoreHorizontal, Paperclip, Plus, Send, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 type ChatImage = { url: string; description: string; page: number; documentName: string };
 type ChatMessage = { role: "user" | "assistant"; text: string; images?: ChatImage[] };
-type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" };
 
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
@@ -481,22 +481,22 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                         }}
                         onClick={() => loadSession(session)}
                       >
-                        {session.type === "manual" ? (
-                          <Wrench
+                        {session.type === "slide" ? (
+                          <LayoutTemplate
                             size={11}
-                            style={{
-                              flexShrink: 0,
-                              color: "var(--ink-faint)",
-                            }}
+                            style={{ flexShrink: 0, color: "var(--ink-faint)" }}
+                            aria-hidden="true"
+                          />
+                        ) : session.type === "manual" || session.type === "document" ? (
+                          <FileText
+                            size={11}
+                            style={{ flexShrink: 0, color: "var(--ink-faint)" }}
                             aria-hidden="true"
                           />
                         ) : (
                           <MessageCircle
                             size={11}
-                            style={{
-                              flexShrink: 0,
-                              color: "var(--ink-faint)",
-                            }}
+                            style={{ flexShrink: 0, color: "var(--ink-faint)" }}
                             aria-hidden="true"
                           />
                         )}
@@ -976,7 +976,7 @@ function AssistantMessage({
 }) {
   return (
     <div style={{ display: "flex", justifyContent: "flex-start" }}>
-      <div style={{ maxWidth: "84%" }}>
+      <div style={{ width: "100%" }}>
         <div className="row" style={{ marginBottom: 8, gap: 8 }}>
           <span
             style={{
