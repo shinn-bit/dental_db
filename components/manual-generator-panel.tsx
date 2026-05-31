@@ -820,6 +820,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         setOutputType(session.outputType ?? "word");
         setGeneratedTheme(session.generatedTheme ?? "");
         setDocMode(session.docMode ?? "summary");
+        if (!initialRepoItemId) setRepoItemId(null);
 
         const restoredMsgs: ManualMessage[] = await Promise.all(
           (session.messages ?? []).map(async msg => {
@@ -878,6 +879,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       setOutputType(session.outputType ?? "word");
       setGeneratedTheme(session.generatedTheme ?? "");
       setDocMode(session.docMode ?? "summary");
+      setRepoItemId(null);
       setEditSelectedSlides([]);
       embedCounterRef.current = 0;
       const restoredMsgs: ManualMessage[] = await Promise.all(
