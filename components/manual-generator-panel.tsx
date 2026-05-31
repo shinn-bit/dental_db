@@ -40,6 +40,7 @@ type ManualMessageStored = {
 type ManualSession = {
   id: string; title: string; type: "manual" | "slide";
   outputType: "word" | "slide"; generatedTheme: string;
+  docMode?: "summary" | "procedure" | "free";
   content: string; slidesHtml: string[];
   messages: ManualMessageStored[];
 };
@@ -244,6 +245,45 @@ const WORD_SYS_PROMPT = [
   ...MANUAL_SECTIONS.map((s, i) => `## ${i + 1}. ${s}`),
   "",
   "第8項目（治療中に確認するチェックリスト）は「- [ ] 」形式の箇条書きにしてください。",
+].join("\n");
+
+const PROCEDURE_SYS_PROMPT = [
+  "あなたは歯科医院の院内手順書作成AIです。",
+  "ユーザーの指示に従い、以下の4項目構成でMarkdown形式の手順書を生成・編集してください。",
+  "修正指示がある場合は、修正していない部分も含めた完全な手順書を出力してください。",
+  "画像の取り扱い:",
+  "- 参考画像: 内容生成の参考としてください",
+  "- 埋め込み画像(IMAGE_N): 指定された場所（またはAIが判断した最適な場所）に [IMAGE_N] と記述してください。",
+  "  修正時も既存の [IMAGE_N] マーカーを維持してください。",
+  "",
+  "【出力構成（必ずこの順番・見出しで出力）】",
+  "",
+  "## 1. 準備物",
+  "（必要な物品・器材・材料をリスト形式で列挙）",
+  "",
+  "## 2. 作業の目的・ゴールのイメージ",
+  "（どうなったら成功か、何を成し遂げたら完了か、何をするための作業かを記述）",
+  "",
+  "## 3. 手順と各ステップの注意点",
+  "（各ステップをMarkdownの表形式で記述。列は「ステップ」「手順」「注意点」の3列。ステップ数は内容に応じて適切に設定すること）",
+  "| ステップ | 手順 | 注意点 |",
+  "|---|---|---|",
+  "| Step 1 | （手順の内容） | （注意点） |",
+  "| Step 2 | （手順の内容） | （注意点） |",
+  "",
+  "## 4. チェックリスト",
+  "（第3項の各手順をワンフレーズにまとめた「- [ ] 」形式のチェックリスト。見ながら作業できるよう簡潔に記述）",
+].join("\n");
+
+const FREE_SYS_PROMPT = [
+  "あなたは歯科医院の院内資料作成AIです。",
+  "ユーザーの指示に従い、Markdown形式で資料を自由に作成・編集してください。",
+  "項目構成や見出しはユーザーの指示・内容に応じて自由に設定してください。固定の項目テンプレートには従わないでください。",
+  "修正指示がある場合は、修正していない部分も含めた完全な資料を出力してください。",
+  "画像の取り扱い:",
+  "- 参考画像: 内容生成の参考としてください",
+  "- 埋め込み画像(IMAGE_N): 指定された場所（またはAIが判断した最適な場所）に [IMAGE_N] と記述してください。",
+  "  修正時も既存の [IMAGE_N] マーカーを維持してください。",
 ].join("\n");
 
 const SLIDE_SYS_PROMPT = [
@@ -478,6 +518,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
 
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
+  const [docMode, setDocMode] = useState<"summary" | "procedure" | "free">("summary");
   const [editSelectedSlides, setEditSelectedSlides] = useState<number[]>([]);
 
   const [loading, setLoading] = useState(false);
@@ -664,6 +705,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     setMessages([]); setInput(""); setPendingImages([]); setPendingDocs([]); setUploadQueue(null);
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
+    setDocMode("summary");
     embedCounterRef.current = 0;
   }
 
@@ -699,7 +741,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     outType: "word" | "slide"; theme: string;
   }) {
     const id = sessionIdRef.current;
-    const title = opts.theme || opts.msgs.find(m => m.role === "user")?.text?.slice(0, 30) || "マニュアル";
+    const title = opts.theme || opts.msgs.find(m => m.role === "user")?.text?.slice(0, 30) || "解説書";
     const storedMsgs: ManualMessageStored[] = opts.msgs.map(msg => ({
       role: msg.role, text: msg.text,
       ...(msg.displayText ? { displayText: msg.displayText } : {}),
@@ -716,6 +758,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     const session: ManualSession = {
       id, title, type: opts.outType === "slide" ? "slide" : "manual",
       outputType: opts.outType, generatedTheme: opts.theme,
+      docMode,
       content: opts.body, slidesHtml: opts.slides, messages: storedMsgs,
     };
     fetch(`/api/chat-sessions/${id}`, {
@@ -749,6 +792,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
         setGeneratedOutputType(session.outputType ?? "word");
         setOutputType(session.outputType ?? "word");
         setGeneratedTheme(session.generatedTheme ?? "");
+        setDocMode(session.docMode ?? "summary");
 
         const restoredMsgs: ManualMessage[] = await Promise.all(
           (session.messages ?? []).map(async msg => {
@@ -806,6 +850,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
       setGeneratedOutputType(session.outputType ?? "word");
       setOutputType(session.outputType ?? "word");
       setGeneratedTheme(session.generatedTheme ?? "");
+      setDocMode(session.docMode ?? "summary");
       setEditSelectedSlides([]);
       embedCounterRef.current = 0;
       const restoredMsgs: ManualMessage[] = await Promise.all(
@@ -1043,12 +1088,14 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
         // ── Word 文書生成 ─────────────────────────────────────────────────
         const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
         const wordContents = buildContents(augmentedText, pendingImages, resolvedDocs, content || undefined);
+        const activeWordPrompt = docMode === "procedure" ? PROCEDURE_SYS_PROMPT : docMode === "free" ? FREE_SYS_PROMPT : WORD_SYS_PROMPT;
         let accumulated = "";
-        await streamGenerate(GEMINI_FLASH_MODEL, WORD_SYS_PROMPT, wordContents, chunk => {
+        await streamGenerate(GEMINI_FLASH_MODEL, activeWordPrompt, wordContents, chunk => {
           accumulated = chunk;
           setContent(chunk);
         });
-        const finalMsgs = [...newHistory, { role: "model" as const, text: accumulated, displayText: "✓ マニュアルを生成・更新しました。修正があればお知らせください。" }];
+        const docLabel = docMode === "procedure" ? "手順書" : docMode === "free" ? "資料" : "解説書";
+        const finalMsgs = [...newHistory, { role: "model" as const, text: accumulated, displayText: `✓ ${docLabel}を生成・更新しました。修正があればお知らせください。` }];
         setMessages(finalMsgs);
         saveSession({ msgs: finalMsgs, body: accumulated, slides: [], outType: currentOutputType, theme });
       }
@@ -1219,7 +1266,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
               style={{ flex: 1, display: "flex", alignItems: "center", gap: 5, padding: "4px 6px", border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", fontSize: 12, fontWeight: 500, whiteSpace: "nowrap" }}
             >
               <Plus size={13} aria-hidden="true" />
-              新しいマニュアル
+              新しい解説書
             </button>
           ) : null}
         </div>
@@ -1326,10 +1373,15 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
         <div className="panel-head">
           <div className="row" style={{ gap: 8 }}>
             <FileText size={16} style={{ color: "var(--navy)" }} aria-hidden="true" />
-            <span className="panel-title">マニュアル作成</span>
+            <span className="panel-title">解説書作成</span>
+            {messages.length > 0 ? (
+              <span style={{ fontSize: 10, color: "var(--ink-muted)", background: "var(--navy-tint-soft, #eef2f8)", padding: "2px 7px", borderRadius: 10, letterSpacing: "0.06em", flexShrink: 0 }}>
+                {docMode === "procedure" ? "手順作成" : docMode === "free" ? "自由作成" : "病気の要約"}
+              </span>
+            ) : null}
           </div>
           <div className="row" style={{ gap: 6 }}>
-            <button type="button" onClick={newManual} title="新しいマニュアル"
+            <button type="button" onClick={newManual} title="新しい解説書"
               style={{ width: 28, height: 28, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Plus size={15} aria-hidden="true" />
             </button>
@@ -1345,10 +1397,45 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
         {/* メッセージ一覧 */}
         <div style={{ flex: 1, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
           {messages.length === 0 && !loading ? (
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 10, color: "var(--ink-faint)", padding: 24 }}>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 18, color: "var(--ink-faint)", padding: 24 }}>
               <Sparkles size={28} strokeWidth={1.2} aria-hidden="true" />
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+                <p style={{ margin: 0, fontSize: 11, color: "var(--ink-muted)", letterSpacing: "0.1em" }}>作成モードを選択</p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {(["summary", "procedure"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setDocMode(mode)}
+                      style={{
+                        padding: "9px 18px", fontSize: 13, fontWeight: 600,
+                        border: `1.5px solid ${docMode === mode ? "var(--navy)" : "var(--line)"}`,
+                        borderRadius: 20,
+                        background: docMode === mode ? "var(--navy)" : "transparent",
+                        color: docMode === mode ? "#fff" : "var(--ink-soft)",
+                        cursor: "pointer", transition: "all .12s ease",
+                      }}
+                    >
+                      {mode === "summary" ? "病気の要約" : "手順作成"}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDocMode("free")}
+                  style={{
+                    background: "transparent", border: "none", cursor: "pointer",
+                    fontSize: 11, padding: "2px 6px",
+                    color: docMode === "free" ? "var(--navy)" : "var(--ink-muted)",
+                    fontWeight: docMode === "free" ? 600 : 400,
+                    textDecoration: "underline",
+                  }}
+                >
+                  自由作成
+                </button>
+              </div>
               <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.8 }}>
-                作成したいマニュアルを<br />自由に入力してください<br />
+                作成したい内容を入力してください<br />
                 <span style={{ fontSize: 12, color: "var(--ink-muted)" }}>画像・PDF・DOCXの添付にも対応しています</span>
               </p>
             </div>
@@ -1542,7 +1629,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
               <span>追加</span>
             </button>
             <input type="file" accept="image/*,.pdf,.docx" multiple hidden ref={fileInputRef} onChange={handleFileAttach} />
-            <textarea className="textarea" rows={3} placeholder="マニュアル作成の指示を入力…" value={input}
+            <textarea className="textarea" rows={3} placeholder={docMode === "procedure" ? "手順書の内容を入力…" : docMode === "free" ? "作成内容を自由に入力…" : "病気・処置名などを入力…"} value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendMessage(); } }}
               disabled={loading} style={{ resize: "none" }}
@@ -1629,7 +1716,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10, color: "var(--ink-faint)" }}>
                 <FileText size={32} strokeWidth={1.2} aria-hidden="true" />
                 <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.8 }}>
-                  左のチャットからマニュアルを作成します
+                  左のチャットから解説書を作成します
                 </p>
               </div>
             )}
