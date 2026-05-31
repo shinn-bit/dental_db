@@ -7,8 +7,9 @@ import { clsx } from "clsx";
 
 const navItems = [
   { href: "/", label: "AIチャット" },
-  { href: "/manual", label: "マニュアル作成" },
-  { href: "/repository", label: "資料庫" }
+  { href: "/manual", label: "解説書作成" },
+  { href: "/repository", label: "資料庫" },
+  { href: "/manual-repository", label: "保管庫" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

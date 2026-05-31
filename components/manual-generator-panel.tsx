@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, LayoutTemplate, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
+import { Archive, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Folder, LayoutTemplate, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
@@ -64,6 +64,22 @@ type UploadQueue = {
 };
 
 type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" };
+type RepoFolder = { id: string; name: string; parentId: string | null };
+
+function flattenFoldersForPicker(
+  folders: RepoFolder[],
+  parentId: string | null,
+  depth: number
+): { id: string; name: string; depth: number }[] {
+  const result: { id: string; name: string; depth: number }[] = [];
+  folders
+    .filter(f => f.parentId === parentId)
+    .forEach(f => {
+      result.push({ id: f.id, name: f.name, depth });
+      result.push(...flattenFoldersForPicker(folders, f.id, depth + 1));
+    });
+  return result;
+}
 
 // ── Gemini API helpers ────────────────────────────────────────────────────────
 
@@ -496,9 +512,10 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadChatSession }: {
+export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRepoItemId, onLoadChatSession }: {
   onSwitchMode?: () => void;
   initialSessionId?: string | null;
+  initialRepoItemId?: string | null;
   onLoadChatSession?: (id: string) => void;
 }) {
   const [messages, setMessages] = useState<ManualMessage[]>([]);
@@ -520,6 +537,14 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
   const [docMode, setDocMode] = useState<"summary" | "procedure" | "free">("summary");
   const [editSelectedSlides, setEditSelectedSlides] = useState<number[]>([]);
+
+  // 保管庫
+  const [repoItemId, setRepoItemId] = useState<string | null>(initialRepoItemId ?? null);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [repoFolders, setRepoFolders] = useState<RepoFolder[]>([]);
+  const [saveTitle, setSaveTitle] = useState("");
+  const [saveFolderId, setSaveFolderId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -706,6 +731,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
     setDocMode("summary");
+    setRepoItemId(null);
     embedCounterRef.current = 0;
   }
 
@@ -925,6 +951,61 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     return Array.from(embeddedImageMap.entries()).map(([imageIndex, img]) => ({
       imageIndex, base64: img.base64, mimeType: img.mimeType,
     }));
+  }
+
+  // ── 保管庫への保存 ────────────────────────────────────────────────────────
+
+  async function openSaveModal() {
+    setSaveTitle(generatedTheme || "");
+    setSaveFolderId(null);
+    setShowSaveModal(true);
+    if (repoFolders.length === 0) {
+      const data = await fetch("/api/manual-repository").then(r => r.json()) as { folders: RepoFolder[] };
+      setRepoFolders(data.folders ?? []);
+    }
+  }
+
+  async function saveToRepository() {
+    if (!saveTitle.trim() || saving) return;
+    setSaving(true);
+    try {
+      if (repoItemId) {
+        await fetch("/api/manual-repository", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "overwrite-item",
+            id: repoItemId,
+            ...(generatedOutputType === "slide" && slidesHtml[0] ? { firstSlideHtml: slidesHtml[0] } : {}),
+          }),
+        });
+      } else {
+        const res = await fetch("/api/manual-repository", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save-item",
+            item: {
+              title: saveTitle.trim(),
+              folderId: saveFolderId,
+              sessionId: currentSessionId ?? sessionIdRef.current,
+              type: generatedOutputType,
+              docMode,
+              ...(generatedOutputType === "slide" && slidesHtml[0] ? { firstSlideHtml: slidesHtml[0] } : {}),
+            },
+          }),
+        });
+        const { id } = await res.json() as { id: string };
+        setRepoItemId(id);
+      }
+      setShowSaveModal(false);
+      setNotice("保管庫に保存しました");
+      window.setTimeout(() => setNotice(n => n === "保管庫に保存しました" ? "" : n), 2000);
+    } catch {
+      setNotice("保存に失敗しました");
+    } finally {
+      setSaving(false);
+    }
   }
 
   // ── Send message ──────────────────────────────────────────────────────────
@@ -1233,6 +1314,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
+    <>
     <section className="panel" style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0, width: "100%" }}>
 
       {/* ── サイドバー（履歴） ── */}
@@ -1655,6 +1737,16 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
               : "プレビュー"}
           </span>
           <div className="row" style={{ gap: 6 }}>
+            {!loading && (content || slidesHtml.length > 0) ? (
+              <Button
+                variant="ghost"
+                onClick={openSaveModal}
+                style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}
+              >
+                <Archive size={13} aria-hidden="true" />
+                {repoItemId ? "上書き保存" : "保管庫に保存"}
+              </Button>
+            ) : null}
             {!loading && generatedOutputType === "word" && content ? (
               <>
                 <Button variant="ghost" onClick={generateSlidesFromContent} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
@@ -1724,5 +1816,88 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
         )}
       </div>
     </section>
+
+    {/* ── 保管庫保存モーダル ── */}
+    {showSaveModal ? (
+      <div
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center" }}
+        onClick={() => setShowSaveModal(false)}
+      >
+        <div
+          style={{ background: "#fff", borderRadius: 16, padding: 24, width: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}
+          onClick={e => e.stopPropagation()}
+        >
+          <p style={{ margin: "0 0 16px", fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>
+            {repoItemId ? "上書き保存" : "保管庫に保存"}
+          </p>
+
+          {/* タイトル */}
+          <label style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4, display: "block", letterSpacing: "0.06em" }}>
+            タイトル
+          </label>
+          <input
+            className="input"
+            value={saveTitle}
+            onChange={e => setSaveTitle(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") saveToRepository(); }}
+            style={{ marginBottom: 16, height: 36 }}
+          />
+
+          {/* フォルダ選択（新規保存時のみ） */}
+          {!repoItemId ? (
+            <>
+              <label style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4, display: "block", letterSpacing: "0.06em" }}>
+                保存先フォルダ
+              </label>
+              <div style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden auto", maxHeight: 200, marginBottom: 16 }}>
+                {/* Root option */}
+                <button
+                  type="button"
+                  onClick={() => setSaveFolderId(null)}
+                  style={{ width: "100%", textAlign: "left", padding: "7px 12px", fontSize: 12, border: "none", background: saveFolderId === null ? "var(--navy-tint-soft, #eef2f8)" : "transparent", cursor: "pointer", color: saveFolderId === null ? "var(--navy)" : "var(--ink-soft)", display: "flex", alignItems: "center", gap: 6, fontWeight: saveFolderId === null ? 600 : 400 }}
+                >
+                  <Folder size={12} />
+                  ルート（フォルダなし）
+                </button>
+                {flattenFoldersForPicker(repoFolders, null, 0).map(({ id, name, depth }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setSaveFolderId(id)}
+                    style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", background: saveFolderId === id ? "var(--navy-tint-soft, #eef2f8)" : "transparent", cursor: "pointer", color: saveFolderId === id ? "var(--navy)" : "var(--ink-soft)", display: "flex", alignItems: "center", gap: 6, fontWeight: saveFolderId === id ? 600 : 400 }}
+                  >
+                    <Folder size={12} />
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: "var(--ink-muted)", marginBottom: 16, lineHeight: 1.6 }}>
+              既存の保管庫エントリを最新の内容で更新します。
+            </p>
+          )}
+
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              onClick={() => setShowSaveModal(false)}
+              style={{ padding: "8px 18px", fontSize: 13, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: "pointer", color: "var(--ink-soft)" }}
+            >
+              キャンセル
+            </button>
+            <button
+              type="button"
+              onClick={saveToRepository}
+              disabled={saving || !saveTitle.trim()}
+              style={{ padding: "8px 18px", fontSize: 13, border: "none", borderRadius: "var(--radius)", background: "var(--navy)", cursor: saving ? "default" : "pointer", color: "#fff", fontWeight: 600, opacity: saving || !saveTitle.trim() ? 0.6 : 1 }}
+            >
+              {saving ? "保存中…" : repoItemId ? "上書き保存" : "保存"}
+            </button>
+          </div>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
