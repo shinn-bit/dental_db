@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Check, ChevronDown, ChevronRight, FileText, Folder, FolderOpen,
-  MoreHorizontal, Plus, X,
+  LayoutTemplate, MoreHorizontal, Plus, X,
 } from "lucide-react";
 
 type RepoFolder = { id: string; name: string; parentId: string | null };
@@ -405,6 +405,39 @@ export function ManualRepositoryPanel() {
     );
   }
 
+  // ── Sidebar item row (inline JSX, not a component) ───────────────────────
+
+  function renderItemRow(item: RepoItem, depth: number) {
+    const indent = 6 + depth * 14;
+    const isDragging = draggingId === item.id;
+    return (
+      <div
+        key={item.id}
+        draggable
+        onDragStart={e => onDragStart(e, { id: item.id, kind: "item" })}
+        onDragEnd={onDragEnd}
+        onClick={() => openItem(item)}
+        onMouseEnter={e => { (e.currentTarget as HTMLDivElement).style.background = "var(--navy-tint-soft,#eef2f8)"; }}
+        onMouseLeave={e => { (e.currentTarget as HTMLDivElement).style.background = "transparent"; }}
+        style={{
+          display: "flex", alignItems: "center", gap: 5,
+          padding: `3px 8px 3px ${indent}px`,
+          borderRadius: 6, cursor: "pointer",
+          opacity: isDragging ? 0.4 : 1,
+          background: "transparent",
+        }}
+        title={item.title}
+      >
+        {item.type === "slide"
+          ? <LayoutTemplate size={11} style={{ color: "var(--navy)", flexShrink: 0 }} />
+          : <FileText size={11} style={{ color: "var(--ink-muted)", flexShrink: 0 }} />}
+        <span style={{ fontSize: 11, color: "var(--ink-soft)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
+          {item.title}
+        </span>
+      </div>
+    );
+  }
+
   // ── Sidebar folder tree ───────────────────────────────────────────────────
 
   function renderTree(parentId: string | null, depth: number): React.ReactNode {
@@ -488,6 +521,7 @@ export function ManualRepositoryPanel() {
           {isExpanded && (
             <>
               {renderTree(folder.id, depth + 1)}
+              {catalog.items.filter(i => i.folderId === folder.id).map(item => renderItemRow(item, depth + 1))}
               {addingFolderParentId === folder.id && newFolderInputRow(depth + 1)}
             </>
           )}
@@ -529,6 +563,7 @@ export function ManualRepositoryPanel() {
 
         <div style={{ flex: 1, overflowY: "auto", padding: "6px 4px" }}>
           {renderTree(null, 0)}
+          {catalog.items.filter(i => i.folderId === null).map(item => renderItemRow(item, 0))}
           {addingFolderParentId === null && newFolderInputRow(0)}
         </div>
 
