@@ -239,11 +239,11 @@ export function InsuranceChatPanel({
     try {
       const res = await fetch("/api/insurance-sync", { method: "POST" });
       const data = (await res.json()) as { jobId?: string; status?: string; error?: string };
-      if (!res.ok) throw new Error(data.error ?? "同期に失敗しました");
-      setSyncNotice("同期ジョブを開始しました。数分後に反映されます。");
-      window.setTimeout(() => setSyncNotice(""), 5000);
+      if (!res.ok) throw new Error(data.error ?? "資料の取り込みに失敗しました");
+      setSyncNotice("取り込みを開始しました。数分後に検索へ反映されます。");
+      window.setTimeout(() => setSyncNotice(""), 6000);
     } catch (e) {
-      setSyncNotice(e instanceof Error ? e.message : "同期に失敗しました");
+      setSyncNotice(e instanceof Error ? e.message : "資料の取り込みに失敗しました");
     } finally {
       setSyncing(false);
     }
@@ -347,10 +347,10 @@ export function InsuranceChatPanel({
                 </span>
               )}
               <button type="button" onClick={syncInsuranceKB} disabled={syncing}
-                title="保険ルール資料をKBに同期"
+                title="14_保険ルールフォルダに資料を追加・移動した際に押してください"
                 style={{ display: "flex", alignItems: "center", gap: 5, padding: "4px 10px", border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: syncing ? "default" : "pointer", color: "var(--ink-soft)", fontSize: 12, opacity: syncing ? 0.6 : 1 }}>
                 <RefreshCw size={12} style={{ animation: syncing ? "spin 1s linear infinite" : "none" }} aria-hidden="true" />
-                {syncing ? "同期中…" : "KB同期"}
+                {syncing ? "取り込み中…" : "資料を反映"}
               </button>
             </div>
           </div>
@@ -365,8 +365,8 @@ export function InsuranceChatPanel({
                     治療内容・請求内容・保険ルールの質問を入力してください
                   </p>
                   <p style={{ margin: 0, fontSize: 11, color: "var(--ink-muted)", lineHeight: 1.7 }}>
-                    資料庫の <strong>14_保険ルール</strong> フォルダに資料を追加し<br />
-                    「KB同期」ボタンを押すと精度が上がります
+                    資料庫の <strong>14_保険ルール</strong> フォルダに資料を追加・移動したら<br />
+                    右上の「資料を反映」ボタンを押してください
                   </p>
                 </div>
               </div>
