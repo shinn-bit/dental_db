@@ -45,6 +45,7 @@ type ActionBody =
   | { action: "delete-item"; id: string }
   | { action: "create-folder"; name: string; parentId: string | null }
   | { action: "rename-folder"; id: string; name: string }
+  | { action: "move-folder"; id: string; parentId: string | null }
   | { action: "delete-folder"; id: string };
 
 export async function POST(req: Request) {
@@ -97,6 +98,13 @@ export async function POST(req: Request) {
       const folder = catalog.folders.find(f => f.id === body.id);
       if (!folder) return NextResponse.json({ error: "not found" }, { status: 404 });
       folder.name = body.name;
+      await writeCatalog(catalog);
+      return NextResponse.json({ ok: true });
+    }
+    case "move-folder": {
+      const folder = catalog.folders.find(f => f.id === body.id);
+      if (!folder) return NextResponse.json({ error: "not found" }, { status: 404 });
+      folder.parentId = body.parentId;
       await writeCatalog(catalog);
       return NextResponse.json({ ok: true });
     }
