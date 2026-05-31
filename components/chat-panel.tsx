@@ -162,7 +162,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   }
 
   async function loadSession(session: SessionSummary) {
-    if (session.type === "manual") {
+    if (session.type === "manual" || session.type === "slide") {
       onLoadManualSession?.(session.id);
       return;
     }

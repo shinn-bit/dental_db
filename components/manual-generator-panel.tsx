@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, Wrench, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, ExternalLink, FileText, LayoutTemplate, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
@@ -38,7 +38,7 @@ type ManualMessageStored = {
   images?: ManualImageRefStored[];
 };
 type ManualSession = {
-  id: string; title: string; type: "manual";
+  id: string; title: string; type: "manual" | "slide";
   outputType: "word" | "slide"; generatedTheme: string;
   content: string; slidesHtml: string[];
   messages: ManualMessageStored[];
@@ -62,7 +62,7 @@ type UploadQueue = {
   placementText: string;
 };
 
-type SessionSummary = { id: string; title: string; type?: "chat" | "manual" };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" };
 
 // ── Gemini API helpers ────────────────────────────────────────────────────────
 
@@ -714,7 +714,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
       } : {}),
     }));
     const session: ManualSession = {
-      id, title, type: "manual",
+      id, title, type: opts.outType === "slide" ? "slide" : "manual",
       outputType: opts.outType, generatedTheme: opts.theme,
       content: opts.body, slidesHtml: opts.slides, messages: storedMsgs,
     };
@@ -726,7 +726,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
     setSessions(prev => {
       const exists = prev.some(s => s.id === id);
       if (exists) return prev.map(s => s.id === id ? { ...s, title } : s);
-      return [{ id, title, type: "manual" as const satisfies SessionSummary["type"] }, ...prev];
+      return [{ id, title, type: (opts.outType === "slide" ? "slide" : "manual") as SessionSummary["type"] }, ...prev];
     });
     setCurrentSessionId(id);
   }
@@ -1255,8 +1255,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, onLoadCha
                         else onLoadChatSession?.(session.id);
                       }}
                     >
-                      {session.type === "manual" ? (
-                        <Wrench size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                      {session.type === "slide" ? (
+                        <LayoutTemplate size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                      ) : session.type === "manual" || session.type === "document" ? (
+                        <FileText size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
                       ) : (
                         <MessageCircle size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
                       )}
