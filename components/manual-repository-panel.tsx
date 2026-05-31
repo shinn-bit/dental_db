@@ -162,6 +162,7 @@ export function ManualRepositoryPanel() {
 
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/manual-repository")
@@ -192,15 +193,16 @@ export function ManualRepositoryPanel() {
       return;
     }
     const parentId = addingFolderParentId ?? null;
+    setFolderError(null);
     try {
       const { id } = await api({ action: "create-folder", name, parentId });
       setCatalog(prev => ({ ...prev, folders: [...prev.folders, { id: id as string, name, parentId }] }));
       if (parentId) setExpandedFolders(prev => new Set([...prev, parentId]));
-    } catch {
-      // silent — folder won't appear, user can retry
+      setAddingFolderParentId(undefined);
+      setNewFolderName("");
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : "フォルダ作成に失敗しました");
     }
-    setAddingFolderParentId(undefined);
-    setNewFolderName("");
   }
 
   async function renameFolder(id: string, name: string) {
@@ -408,10 +410,16 @@ export function ManualRepositoryPanel() {
           {addingFolderParentId === null && newFolderInputJsx(0)}
         </div>
 
+        {folderError ? (
+          <div style={{ padding: "6px 8px", background: "#fff5f5", borderTop: "1px solid #feb2b2", flexShrink: 0 }}>
+            <p style={{ margin: 0, fontSize: 11, color: "#c53030", lineHeight: 1.4 }}>{folderError}</p>
+            <button type="button" onClick={() => setFolderError(null)} style={{ fontSize: 10, color: "#c53030", background: "none", border: "none", cursor: "pointer", padding: 0, textDecoration: "underline" }}>閉じる</button>
+          </div>
+        ) : null}
         <div style={{ padding: 8, borderTop: "1px solid var(--line)", flexShrink: 0 }}>
           <button
             type="button"
-            onClick={() => { setAddingFolderParentId(null); setNewFolderName(""); }}
+            onClick={() => { setAddingFolderParentId(null); setNewFolderName(""); setFolderError(null); }}
             style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", border: "1px dashed var(--line)", borderRadius: 6, background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 12 }}
           >
             <Plus size={12} />
