@@ -12,3 +12,4 @@ pnpm-debug.log*
 
 .next-dev*.log
 tsconfig.tsbuildinfo
+iam-patch.json
