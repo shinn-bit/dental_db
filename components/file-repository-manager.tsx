@@ -1,30 +1,24 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  Check, ChevronRight, Clipboard, Edit, Images, Plus, RefreshCw, Search, Trash2, Upload, X
+  Check, ChevronDown, ChevronRight, Clipboard, Edit,
+  Folder, FolderOpen, Images, MoreHorizontal, Plus,
+  RefreshCw, Search, Trash2, Upload, X,
 } from "lucide-react";
 import { Button, FileSpine, FieldLabel } from "@/components/ui";
 import { formatFileSize, getThumbnailLabel, type StoredFileMetadata } from "@/lib/file-assets";
 
-// ── Types ───────────────────────────────────────────────────────
-type LibrarySub = { id: string; label: string };
-type LibraryCategory = { id: string; label: string; sub: string; subs: LibrarySub[] };
-type FileAssignments = Record<string, { catId: string; subId: string | null }>;
+// ── Types ────────────────────────────────────────────────────────
+type RepoFolder = { id: string; name: string; parentId: string | null };
+type FileAssignments = Record<string, string | null>; // fileId → folderId
 
 type RepositoryFile = {
-  id: string;
-  name: string;
-  contentType: string;
-  date: string;
-  sizeLabel: string;
-  thumbnailLabel: string;
-  tags: string[];
-  version: string;
-  memo: string;
-  summary: string;
+  id: string; name: string; contentType: string; date: string;
+  sizeLabel: string; thumbnailLabel: string; tags: string[];
+  version: string; memo: string; summary: string;
   summaryStatus: StoredFileMetadata["summaryStatus"];
   summaryMode: StoredFileMetadata["summaryMode"];
   summaryUpdatedAt: string;
@@ -35,56 +29,116 @@ type RepositoryFile = {
   imageProcessingError: string;
 };
 
-type DetailDraft = { catId: string; subId: string; memo: string };
+type DetailDraft = { folderId: string | null; memo: string };
 
-// ── Default library ─────────────────────────────────────────────
-const DEFAULT_LIBRARY: LibraryCategory[] = [
-  {
-    id: "cat-general", label: "一般診療", sub: "基本処置・応急処置",
-    subs: [{ id: "sub-basic", label: "基本処置" }, { id: "sub-emergency", label: "応急処置" }]
-  },
-  {
-    id: "cat-perio", label: "歯周治療", sub: "スケーリング・外科処置",
-    subs: [{ id: "sub-srp", label: "SRP・スケーリング" }, { id: "sub-surgery", label: "歯周外科" }]
-  },
-  {
-    id: "cat-education", label: "患者教育・予防", sub: "口腔衛生・予防処置",
-    subs: [{ id: "sub-oral", label: "口腔衛生指導" }, { id: "sub-prevention", label: "予防処置" }]
-  }
-];
+type DragCtx = {
+  draggedId: string | null;
+  setDraggedId: (id: string | null) => void;
+  dropTargetId: string | null;
+  setDropTargetId: (id: string | null) => void;
+  onDropFile: (fileId: string, folderId: string | null) => void;
+  onExternalDrop: (files: FileList, folderId: string | null) => void;
+};
 
-const LIBRARY_KEY = "dental-library-tree";
-const ASSIGNMENTS_KEY = "dental-file-folders";
+type FileGridCommonProps = {
+  onOpenSummary: (f: RepositoryFile) => void;
+  onDetail: (f: RepositoryFile) => void;
+  onDelete: (f: RepositoryFile) => void;
+  onProcessImages: (f: RepositoryFile) => void;
+  summaryProcessingId: string | null;
+  blockedSummaryId: string | null;
+  deletingId: string | null;
+  drag: DragCtx;
+};
 
-function readLibrary(): LibraryCategory[] {
-  try { const r = localStorage.getItem(LIBRARY_KEY); if (r) return JSON.parse(r) as LibraryCategory[]; } catch {}
-  return DEFAULT_LIBRARY;
+// ── Storage ──────────────────────────────────────────────────────
+const FOLDERS_KEY = "dental-repo-folders-v2";
+const ASSIGNMENTS_KEY = "dental-repo-assignments-v2";
+
+function readFolders(): RepoFolder[] {
+  try {
+    const v2 = localStorage.getItem(FOLDERS_KEY);
+    if (v2) return JSON.parse(v2) as RepoFolder[];
+    // Migrate from old 2-level format
+    const oldLib = localStorage.getItem("dental-library-tree");
+    if (!oldLib) return [];
+    const lib = JSON.parse(oldLib) as Array<{ id: string; label: string; subs?: Array<{ id: string; label: string }> }>;
+    const folders: RepoFolder[] = [];
+    for (const cat of lib) {
+      folders.push({ id: cat.id, name: cat.label, parentId: null });
+      for (const sub of cat.subs ?? []) {
+        folders.push({ id: sub.id, name: sub.label, parentId: cat.id });
+      }
+    }
+    writeFolders(folders);
+    return folders;
+  } catch { return []; }
 }
-function writeLibrary(lib: LibraryCategory[]) {
-  try { localStorage.setItem(LIBRARY_KEY, JSON.stringify(lib)); } catch {}
+function writeFolders(f: RepoFolder[]) {
+  try { localStorage.setItem(FOLDERS_KEY, JSON.stringify(f)); } catch {}
 }
+
 function readAssignments(): FileAssignments {
-  try { const r = localStorage.getItem(ASSIGNMENTS_KEY); if (r) return JSON.parse(r) as FileAssignments; } catch {}
-  return {};
+  try {
+    const v2 = localStorage.getItem(ASSIGNMENTS_KEY);
+    if (v2) return JSON.parse(v2) as FileAssignments;
+    // Migrate from old { catId, subId } format
+    const old = localStorage.getItem("dental-file-folders");
+    if (!old) return {};
+    const parsed = JSON.parse(old) as Record<string, { catId?: string; subId?: string | null }>;
+    const result: FileAssignments = {};
+    for (const [fid, val] of Object.entries(parsed)) {
+      result[fid] = val.subId || val.catId || null;
+    }
+    writeAssignments(result);
+    return result;
+  } catch { return {}; }
 }
 function writeAssignments(a: FileAssignments) {
   try { localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify(a)); } catch {}
 }
 
-// ── Main component ──────────────────────────────────────────────
-export function FileRepositoryManager() {
-  // Library
-  const [library, setLibraryState] = useState<LibraryCategory[]>(DEFAULT_LIBRARY);
-  const [assignments, setAssignmentsState] = useState<FileAssignments>({});
-  const [path, setPath] = useState<string[]>([]);
-  const [libQuery, setLibQuery] = useState("");
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [draggedId, setDraggedId] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ cat: string; sub: string | null } | null>(null);
-  const [destCat, setDestCat] = useState(DEFAULT_LIBRARY[0]?.id || "");
-  const [destSub, setDestSub] = useState("");  // サブフォルダは省略可能（カテゴリ直属）
+// ── Folder helpers ───────────────────────────────────────────────
+function collectDescendants(folders: RepoFolder[], id: string): Set<string> {
+  const s = new Set<string>();
+  const go = (fid: string) => { s.add(fid); folders.filter(f => f.parentId === fid).forEach(f => go(f.id)); };
+  go(id);
+  return s;
+}
 
-  // Files
+function getAncestors(folders: RepoFolder[], folderId: string | null): RepoFolder[] {
+  if (!folderId) return [];
+  const path: RepoFolder[] = [];
+  let cur: string | null = folderId;
+  while (cur) { const f = folders.find(x => x.id === cur); if (!f) break; path.unshift(f); cur = f.parentId; }
+  return path;
+}
+
+function flattenForPicker(
+  folders: RepoFolder[], excludeIds: Set<string>, parentId: string | null, depth: number
+): { id: string; name: string; depth: number }[] {
+  return folders
+    .filter(f => f.parentId === parentId && !excludeIds.has(f.id))
+    .flatMap(f => [{ id: f.id, name: f.name, depth }, ...flattenForPicker(folders, excludeIds, f.id, depth + 1)]);
+}
+
+// ── Main component ───────────────────────────────────────────────
+export function FileRepositoryManager() {
+  // Folder state
+  const [folders, setFoldersState] = useState<RepoFolder[]>([]);
+  const [assignments, setAssignmentsState] = useState<FileAssignments>({});
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [destFolderId, setDestFolderId] = useState<string | null>(null);
+  const [addingParentId, setAddingParentId] = useState<string | null | undefined>(undefined);
+  const [newFolderName, setNewFolderName] = useState("");
+  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
+  const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
+  const [editingFolderName, setEditingFolderName] = useState("");
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [dropTargetId, setDropTargetId] = useState<string | null>(null);
+
+  // File state
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [files, setFiles] = useState<RepositoryFile[]>([]);
   const [pendingFiles, setPendingFiles] = useState<File[]>([]);
@@ -104,115 +158,66 @@ export function FileRepositoryManager() {
   const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
   const [blockedSummaryId, setBlockedSummaryId] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
+  const [libQuery, setLibQuery] = useState("");
 
   // Load from localStorage on mount
   useEffect(() => {
-    setLibraryState(readLibrary());
+    setFoldersState(readFolders());
     setAssignmentsState(readAssignments());
   }, []);
 
-  // Keep destSub valid when destCat changes
-  useEffect(() => {
-    const cat = library.find((c) => c.id === destCat);
-    if (!cat) { setDestCat(library[0]?.id || ""); return; }
-    if (destSub && !cat.subs.find((s) => s.id === destSub)) {
-      setDestSub(cat.subs[0]?.id || "");
-    }
-  }, [destCat, library]);
-
-  function setLibrary(fn: (prev: LibraryCategory[]) => LibraryCategory[]) {
-    setLibraryState((prev) => { const next = fn(prev); writeLibrary(next); return next; });
+  // ── Storage setters ───────────────────────────────────────────
+  function setFolders(fn: (prev: RepoFolder[]) => RepoFolder[]) {
+    setFoldersState(prev => { const next = fn(prev); writeFolders(next); return next; });
   }
   function setAssignments(fn: (prev: FileAssignments) => FileAssignments) {
-    setAssignmentsState((prev) => { const next = fn(prev); writeAssignments(next); return next; });
+    setAssignmentsState(prev => { const next = fn(prev); writeAssignments(next); return next; });
   }
 
-  // ── Library CRUD ──
-  function addCategory(label: string) {
-    if (!label.trim()) return;
-    const id = `cat-${Date.now()}`;
-    setLibrary((l) => [...l, { id, label: label.trim(), sub: "", subs: [] }]);
+  // ── Folder CRUD ───────────────────────────────────────────────
+  function addFolder(name: string, parentId: string | null) {
+    if (!name.trim()) return;
+    const id = `f-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    setFolders(prev => [...prev, { id, name: name.trim(), parentId }]);
+    if (parentId) setExpandedIds(prev => new Set([...prev, parentId]));
+    setAddingParentId(undefined);
+    setNewFolderName("");
   }
-  function renameCategory(id: string, label: string) {
-    setLibrary((l) => l.map((c) => c.id === id ? { ...c, label } : c));
+  function renameFolder(id: string, name: string) {
+    if (!name.trim()) { setEditingFolderId(null); return; }
+    setFolders(prev => prev.map(f => f.id === id ? { ...f, name: name.trim() } : f));
+    setEditingFolderId(null);
   }
-  function renameCategorySub(id: string, sub: string) {
-    setLibrary((l) => l.map((c) => c.id === id ? { ...c, sub } : c));
-  }
-  function deleteCategory(id: string) {
-    if (!window.confirm("このカテゴリーを削除します。")) return;
-    setLibrary((l) => l.filter((c) => c.id !== id));
-    setAssignments((a) => {
-      const next = { ...a };
-      Object.keys(next).forEach((fid) => { if (next[fid].catId === id) delete next[fid]; });
+  function deleteFolder(id: string) {
+    if (!window.confirm("このフォルダを削除します。フォルダ内のファイルは未整理に移動されます。")) return;
+    const descendants = collectDescendants(folders, id);
+    setFolders(prev => prev.filter(f => !descendants.has(f.id)));
+    setAssignments(prev => {
+      const next = { ...prev };
+      for (const fid of Object.keys(next)) {
+        if (next[fid] && descendants.has(next[fid]!)) next[fid] = null;
+      }
       return next;
     });
-    if (path[0] === id) setPath([]);
+    if (selectedFolderId && descendants.has(selectedFolderId)) setSelectedFolderId(null);
+    setFolderMenuId(null);
   }
-  function addSub(catId: string, label: string) {
-    if (!label.trim()) return;
-    const id = `sub-${Date.now()}`;
-    setLibrary((l) => l.map((c) => c.id === catId ? { ...c, subs: [...c.subs, { id, label: label.trim() }] } : c));
-  }
-  function renameSub(catId: string, subId: string, label: string) {
-    setLibrary((l) => l.map((c) => c.id === catId ? { ...c, subs: c.subs.map((s) => s.id === subId ? { ...s, label } : s) } : c));
-  }
-  function deleteSub(catId: string, subId: string) {
-    if (!window.confirm("このフォルダーを削除します。")) return;
-    setLibrary((l) => l.map((c) => c.id === catId ? { ...c, subs: c.subs.filter((s) => s.id !== subId) } : c));
-    setAssignments((a) => {
-      const next = { ...a };
-      Object.keys(next).forEach((fid) => { if (next[fid].catId === catId && next[fid].subId === subId) delete next[fid]; });
-      return next;
-    });
-    if (path[0] === catId && path[1] === subId) setPath([catId]);
-  }
-
-  // ── Drag-drop assignment ──
-  function moveFile(fileId: string, catId: string, subId: string | null) {
-    setAssignments((a) => ({ ...a, [fileId]: { catId, subId } }));
+  function moveFile(fileId: string, folderId: string | null) {
+    setAssignments(prev => ({ ...prev, [fileId]: folderId }));
     setDraggedId(null);
-    setDropTarget(null);
+    setDropTargetId(null);
   }
 
-  function handleExternalDrop(droppedFiles: FileList, catId: string, subId: string | null) {
-    if (catId) setDestCat(catId);
-    if (subId) setDestSub(subId);
-    addPendingFiles(droppedFiles);
-  }
-
-  // ── File operations ──
+  // ── File operations (unchanged) ───────────────────────────────
   async function loadFiles(opts: { showLoading?: boolean; updateNotice?: boolean } = {}) {
     if (opts.showLoading) setIsLoadingFiles(true);
     try {
       const res = await fetch("/api/files", { cache: "no-store" });
       if (!res.ok) throw new Error("S3一覧を読み込めませんでした。");
       const data = (await res.json()) as { files: StoredFileMetadata[] };
-      const mapped = data.files.map(toRepositoryFile);
-      setFiles(mapped);
-      // S3メタデータのcatId/subIdをassignmentsに反映（localStorage優先、未設定時のみ補完）
-      setAssignmentsState((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        for (const raw of data.files) {
-          if (raw.catId && !next[raw.id]) {
-            next[raw.id] = { catId: raw.catId, subId: raw.subId ?? null };
-            changed = true;
-          }
-        }
-        if (changed) writeAssignments(next);
-        return next;
-      });
-      // 準備完了済みPDFで未処理のものを自動的に画像処理起動
-      for (const f of mapped) {
-        if (f.preparationStatus === "completed" && f.contentType.includes("pdf") && !f.imageProcessingStatus) {
-          fetch(`/api/files/${f.id}/process-images`, { method: "POST" }).catch(() => {});
-        }
-      }
+      setFiles(data.files.map(toRepositoryFile));
     } catch (error) {
-      if (opts.updateNotice !== false) {
-        setNotice(error instanceof Error ? error.message : "S3一覧を読み込めませんでした。");
-      }
+      if (opts.updateNotice !== false) setNotice(error instanceof Error ? error.message : "S3一覧を読み込めませんでした。");
     } finally {
       if (opts.showLoading) setIsLoadingFiles(false);
     }
@@ -227,20 +232,28 @@ export function FileRepositoryManager() {
 
   useEffect(() => {
     const hasPending = files.some(
-      (f) => f.preparationStatus === "processing" || f.preparationStatus === "syncing" || f.summaryStatus === "processing" || f.imageProcessingStatus === "processing"
+      f => f.preparationStatus === "processing" || f.preparationStatus === "syncing" ||
+           f.summaryStatus === "processing" || f.imageProcessingStatus === "processing"
     );
     if (!hasPending) return;
     const timer = window.setInterval(() => loadFiles({ updateNotice: false }), 8000);
     return () => window.clearInterval(timer);
   }, [files]);
 
+  useEffect(() => {
+    for (const f of files) {
+      if (f.preparationStatus === "completed" && f.contentType.includes("pdf") && !f.imageProcessingStatus) {
+        fetch(`/api/files/${f.id}/process-images`, { method: "POST" }).catch(() => {});
+      }
+    }
+  }, [files]);
 
   function addPendingFiles(nextFiles: FileList | File[]) {
-    const incoming = Array.from(nextFiles).filter((f) => f.size > 0);
+    const incoming = Array.from(nextFiles).filter(f => f.size > 0);
     if (!incoming.length) return;
-    setPendingFiles((cur) => {
-      const keys = new Set(cur.map((f) => `${f.name}-${f.size}`));
-      return [...cur, ...incoming.filter((f) => !keys.has(`${f.name}-${f.size}`))];
+    setPendingFiles(cur => {
+      const keys = new Set(cur.map(f => `${f.name}-${f.size}`));
+      return [...cur, ...incoming.filter(f => !keys.has(`${f.name}-${f.size}`))];
     });
     setNotice("");
   }
@@ -253,41 +266,34 @@ export function FileRepositoryManager() {
       const uploaded: RepositoryFile[] = [];
       for (const file of pendingFiles) {
         const urlRes = await fetch("/api/upload-url", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ fileName: file.name, contentType: file.type || "application/octet-stream" })
         });
         if (!urlRes.ok) throw new Error("Failed to create upload URL");
         const urlData = (await urlRes.json()) as { id: string; uploadUrl: string; s3Key: string };
         const putRes = await fetch(urlData.uploadUrl, {
-          method: "PUT",
-          headers: { "Content-Type": file.type || "application/octet-stream" },
-          body: file
+          method: "PUT", headers: { "Content-Type": file.type || "application/octet-stream" }, body: file
         });
         if (!putRes.ok) throw new Error("Failed to upload file");
         const metaRes = await fetch("/api/files", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             id: urlData.id, fileName: file.name, s3Key: urlData.s3Key,
             contentType: file.type || "application/octet-stream",
             size: file.size, sizeLabel: formatFileSize(file.size),
             thumbnailLabel: getThumbnailLabel(file.name),
-            memo: memo.trim(),
-            uploadedAt: new Date().toISOString(),
-            ...(destCat ? { catId: destCat, subId: destSub || null } : {})
+            memo: memo.trim(), uploadedAt: new Date().toISOString(),
           })
         });
         if (!metaRes.ok) throw new Error("Failed to save metadata");
         const metaData = (await metaRes.json()) as { file: StoredFileMetadata };
         const rf = toRepositoryFile(metaData.file);
         uploaded.push(rf);
-        // assign to selected folder
-        if (destCat) {
-          setAssignments((a) => ({ ...a, [rf.id]: { catId: destCat, subId: destSub || null } }));
+        if (destFolderId !== undefined) {
+          setAssignments(a => ({ ...a, [rf.id]: destFolderId }));
         }
       }
-      setFiles((cur) => [...uploaded, ...cur]);
+      setFiles(cur => [...uploaded, ...cur]);
       setPendingFiles([]);
       setMemo("");
       setNotice(`${uploaded.length}件を資料庫に追加しました。`);
@@ -305,8 +311,8 @@ export function FileRepositoryManager() {
     try {
       const res = await fetch(`/api/files/${file.id}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete file");
-      setFiles((cur) => cur.filter((f) => f.id !== file.id));
-      setAssignments((a) => { const next = { ...a }; delete next[file.id]; return next; });
+      setFiles(cur => cur.filter(f => f.id !== file.id));
+      setAssignments(a => { const next = { ...a }; delete next[file.id]; return next; });
       setNotice(`${file.name} を削除しました。`);
     } catch {
       setNotice("削除に失敗しました。SSO期限やS3設定を確認してください。");
@@ -318,7 +324,7 @@ export function FileRepositoryManager() {
   async function openOrCreateSummary(file: RepositoryFile) {
     if (file.summaryStatus !== "completed" && file.preparationStatus !== "completed") {
       setBlockedSummaryId(file.id);
-      window.setTimeout(() => setBlockedSummaryId((cur) => cur === file.id ? null : cur), 3600);
+      window.setTimeout(() => setBlockedSummaryId(cur => cur === file.id ? null : cur), 3600);
       return;
     }
     setSummaryProcessingId(file.id);
@@ -329,7 +335,7 @@ export function FileRepositoryManager() {
       const data = (await res.json()) as { summary?: string; file?: StoredFileMetadata; error?: string };
       if (!res.ok) throw new Error(data.error || "要約の取得または作成に失敗しました。");
       const nextFile = toRepositoryFile(data.file as StoredFileMetadata);
-      setFiles((cur) => cur.map((f) => f.id === nextFile.id ? nextFile : f));
+      setFiles(cur => cur.map(f => f.id === nextFile.id ? nextFile : f));
       if (nextFile.summaryStatus === "completed") {
         setSelectedSummary(nextFile);
         setSummaryDraft(data.summary || nextFile.summary);
@@ -351,8 +357,6 @@ export function FileRepositoryManager() {
       const res = await fetch(`/api/files/${file.id}/process-images`, { method: "POST" });
       const data = (await res.json()) as { status?: string; error?: string };
       if (!res.ok) throw new Error(data.error || "画像処理の開始に失敗しました。");
-      // API がメタデータに "processing" を書いた後に返るので、
-      // loadFiles() するとボタンが「処理中…」に変わる
       await loadFiles({ updateNotice: false });
       setNotice("画像処理を開始しました。完了まで数分かかります。");
     } catch (error) {
@@ -360,20 +364,18 @@ export function FileRepositoryManager() {
     }
   }
 
-
   async function saveSummary() {
     if (!selectedSummary) return;
     setSummaryProcessingId(selectedSummary.id);
     try {
       const res = await fetch(`/api/files/${selectedSummary.id}/summary`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ summary: summaryDraft })
       });
       const data = (await res.json()) as { summary?: string; file?: StoredFileMetadata; error?: string };
       if (!res.ok) throw new Error(data.error || "要約の保存に失敗しました。");
       const nextFile = toRepositoryFile(data.file as StoredFileMetadata);
-      setFiles((cur) => cur.map((f) => f.id === nextFile.id ? nextFile : f));
+      setFiles(cur => cur.map(f => f.id === nextFile.id ? nextFile : f));
       setSelectedSummary(nextFile);
       setSummaryEditing(false);
       setNotice("要約を保存しました。");
@@ -390,19 +392,12 @@ export function FileRepositoryManager() {
       await navigator.clipboard.writeText(summaryDraft);
       setSummaryCopied(true);
       window.setTimeout(() => setSummaryCopied(false), 1600);
-    } catch {
-      setNotice("コピーに失敗しました。");
-    }
+    } catch { setNotice("コピーに失敗しました。"); }
   }
 
   function openDetail(file: RepositoryFile) {
-    const a = assignments[file.id];
     setSelectedDetail(file);
-    setDetailDraft({
-      catId: a?.catId ?? library[0]?.id ?? "",
-      subId: a?.subId ?? library[0]?.subs[0]?.id ?? "",
-      memo: file.memo
-    });
+    setDetailDraft({ folderId: assignments[file.id] ?? null, memo: file.memo });
   }
 
   async function saveDetail() {
@@ -410,16 +405,15 @@ export function FileRepositoryManager() {
     setDetailSaving(true);
     try {
       const res = await fetch(`/api/files/${selectedDetail.id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ memo: detailDraft.memo.trim() })
       });
       const data = (await res.json()) as { file?: StoredFileMetadata; error?: string };
       if (!res.ok || !data.file) throw new Error(data.error || "詳細を保存できませんでした。");
       const nextFile = toRepositoryFile(data.file);
-      setFiles((cur) => cur.map((f) => f.id === nextFile.id ? nextFile : f));
+      setFiles(cur => cur.map(f => f.id === nextFile.id ? nextFile : f));
       setSelectedDetail(nextFile);
-      if (detailDraft.catId) moveFile(selectedDetail.id, detailDraft.catId, detailDraft.subId || null);
+      moveFile(selectedDetail.id, detailDraft.folderId);
       setNotice("詳細を保存しました。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "詳細を保存できませんでした。");
@@ -428,40 +422,145 @@ export function FileRepositoryManager() {
     }
   }
 
-  // ── Counts ──
-  function filesInFolder(catId: string, subId: string) {
-    return files.filter((f) => assignments[f.id]?.catId === catId && assignments[f.id]?.subId === subId).length;
-  }
-  function filesInCategory(catId: string) {
-    return files.filter((f) => assignments[f.id]?.catId === catId).length;
-  }
-
-  const dragCtx = {
-    draggedId, setDraggedId, dropTarget, setDropTarget,
-    moveFile, onExternalDrop: handleExternalDrop
+  // ── Drag context ──────────────────────────────────────────────
+  const dragCtx: DragCtx = {
+    draggedId, setDraggedId,
+    dropTargetId, setDropTargetId,
+    onDropFile: moveFile,
+    onExternalDrop: (files, folderId) => {
+      setDestFolderId(folderId);
+      addPendingFiles(files);
+    },
   };
 
-  const cat = path[0] ? library.find((c) => c.id === path[0]) : null;
-  const sub = path[1] && cat ? cat.subs.find((s) => s.id === path[1]) : null;
+  // ── Computed ──────────────────────────────────────────────────
   const searching = libQuery.trim().length > 0;
-  const searchHits = searching ? files.filter((f) => f.name.toLowerCase().includes(libQuery.toLowerCase())) : [];
-  const filesInSub = sub && cat ? files.filter((f) => assignments[f.id]?.catId === cat.id && assignments[f.id]?.subId === sub.id) : [];
-  const unassignedFiles = files.filter((f) => {
-    const a = assignments[f.id];
-    if (!a || !a.catId) return true;
-    // catId が有効なカテゴリなら「カテゴリ直属」として未整理から除外
-    const assignedCat = library.find((c) => c.id === a.catId);
-    if (!assignedCat) return true;
-    return false;
-  });
+  const searchHits = searching ? files.filter(f => f.name.toLowerCase().includes(libQuery.toLowerCase())) : [];
+  const ancestors = getAncestors(folders, selectedFolderId);
+  const subFolders = folders.filter(f => f.parentId === selectedFolderId);
+  const folderFiles = files.filter(f => (assignments[f.id] ?? null) === selectedFolderId);
+  const pickerFolders = flattenForPicker(folders, new Set(), null, 0);
 
-  // カテゴリ内の全ファイル（サブフォルダに関係なく catId が一致するもの全部）
-  function filesInCategoryAll(catId: string): RepositoryFile[] {
-    return files.filter((f) => assignments[f.id]?.catId === catId);
+  // ── Inline folder input (not a component to preserve focus) ───
+  function newFolderInputRow(depth: number) {
+    const indent = 10 + depth * 14;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 3, padding: `3px 6px 3px ${indent}px` }}>
+        <Folder size={12} style={{ color: "var(--navy)", flexShrink: 0 }} />
+        <input
+          autoFocus
+          value={newFolderName}
+          onChange={e => setNewFolderName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter") { e.preventDefault(); addFolder(newFolderName, addingParentId ?? null); }
+            if (e.key === "Escape") { setAddingParentId(undefined); setNewFolderName(""); }
+          }}
+          placeholder="フォルダ名"
+          style={{ flex: 1, minWidth: 0, fontSize: 11.5, padding: "2px 6px", border: "1px solid var(--navy)", borderRadius: 4, outline: "none" }}
+        />
+        <button type="button" onClick={() => addFolder(newFolderName, addingParentId ?? null)}
+          style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "var(--navy)", borderRadius: 4, cursor: "pointer", color: "#fff", flexShrink: 0 }}>
+          <Check size={11} />
+        </button>
+        <button type="button" onClick={() => { setAddingParentId(undefined); setNewFolderName(""); }}
+          style={{ width: 20, height: 20, display: "flex", alignItems: "center", justifyContent: "center", border: "1px solid var(--line)", background: "transparent", borderRadius: 4, cursor: "pointer", color: "var(--ink-muted)", flexShrink: 0 }}>
+          <X size={11} />
+        </button>
+      </div>
+    );
   }
 
-  const currentCat = library.find((c) => c.id === destCat);
+  // ── Folder tree renderer ──────────────────────────────────────
+  function renderFolderTree(parentId: string | null, depth: number): React.ReactNode {
+    return folders.filter(f => f.parentId === parentId).map(folder => {
+      const hasChildren = folders.some(f => f.parentId === folder.id);
+      const isExpanded = expandedIds.has(folder.id);
+      const isSelected = selectedFolderId === folder.id;
+      const isDropTarget = dropTargetId === folder.id;
+      const indent = 10 + depth * 14;
 
+      return (
+        <div key={folder.id}>
+          <div
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDropTargetId(folder.id); }}
+            onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTargetId(null); }}
+            onDrop={e => {
+              e.preventDefault(); e.stopPropagation(); setDropTargetId(null);
+              if (e.dataTransfer.files?.length) dragCtx.onExternalDrop(e.dataTransfer.files, folder.id);
+              else if (draggedId) dragCtx.onDropFile(draggedId, folder.id);
+            }}
+            style={{
+              display: "flex", alignItems: "center", gap: 3,
+              padding: `4px 4px 4px ${indent}px`,
+              borderRadius: 6,
+              background: isDropTarget ? "var(--navy)" : isSelected ? "var(--navy-tint, #c8d9ee)" : "transparent",
+              color: isDropTarget ? "#fff" : isSelected ? "var(--navy-deep)" : "var(--ink-soft)",
+              outline: isDropTarget ? "2px solid var(--navy-deep)" : "none",
+              outlineOffset: -2, position: "relative",
+            }}
+            onMouseLeave={() => { if (folderMenuId === folder.id) setFolderMenuId(null); }}
+          >
+            {editingFolderId === folder.id ? (
+              <input autoFocus value={editingFolderName}
+                onChange={e => setEditingFolderName(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter") renameFolder(folder.id, editingFolderName); if (e.key === "Escape") setEditingFolderId(null); }}
+                onBlur={() => renameFolder(folder.id, editingFolderName)}
+                style={{ flex: 1, fontSize: 12, padding: "2px 5px", border: "1px solid var(--navy)", borderRadius: 4, outline: "none" }}
+              />
+            ) : (
+              <>
+                <button type="button"
+                  onClick={() => {
+                    setExpandedIds(prev => { const s = new Set(prev); s.has(folder.id) ? s.delete(folder.id) : s.add(folder.id); return s; });
+                    setSelectedFolderId(folder.id);
+                    setFolderMenuId(null);
+                  }}
+                  style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, background: "none", border: "none", cursor: "pointer", minWidth: 0, padding: 0, color: "inherit" }}>
+                  <span style={{ width: 13, flexShrink: 0, display: "flex", justifyContent: "center" }}>
+                    {hasChildren ? (isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />) : null}
+                  </span>
+                  {isExpanded
+                    ? <FolderOpen size={13} style={{ flexShrink: 0, color: isDropTarget ? "#fff" : "var(--navy)" }} />
+                    : <Folder size={13} style={{ flexShrink: 0, color: isDropTarget ? "#fff" : "var(--navy)" }} />}
+                  <span style={{ fontSize: 12.5, fontWeight: isSelected ? 600 : 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, textAlign: "left" }}>
+                    {folder.name}
+                  </span>
+                </button>
+                <button type="button"
+                  onClick={e => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder.id ? null : folder.id); }}
+                  style={{ width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", color: "inherit", flexShrink: 0, opacity: 0.7 }}>
+                  <MoreHorizontal size={10} />
+                </button>
+              </>
+            )}
+
+            {folderMenuId === folder.id && (
+              <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 100, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.14)", minWidth: 140, padding: "4px 0" }}>
+                <button type="button" style={treeMenuItemSt} onClick={() => { setAddingParentId(folder.id); setNewFolderName(""); setExpandedIds(p => new Set([...p, folder.id])); setFolderMenuId(null); }}>
+                  サブフォルダ作成
+                </button>
+                <button type="button" style={treeMenuItemSt} onClick={() => { setEditingFolderId(folder.id); setEditingFolderName(folder.name); setFolderMenuId(null); }}>
+                  名前を変更
+                </button>
+                <button type="button" style={{ ...treeMenuItemSt, color: "#c0392b" }} onClick={() => deleteFolder(folder.id)}>
+                  削除
+                </button>
+              </div>
+            )}
+          </div>
+
+          {isExpanded && (
+            <>
+              {renderFolderTree(folder.id, depth + 1)}
+              {addingParentId === folder.id && newFolderInputRow(depth + 1)}
+            </>
+          )}
+        </div>
+      );
+    });
+  }
+
+  // ── Render ────────────────────────────────────────────────────
   return (
     <>
       <div style={{ display: "grid", gridTemplateColumns: "320px minmax(0,1fr)", gap: 20, alignItems: "stretch", height: "calc(100vh - 200px)", minHeight: 560 }}>
@@ -475,17 +574,17 @@ export function FileRepositoryManager() {
           <div className="panel-pad" style={{ paddingTop: 18, overflowY: "auto", flex: 1, minHeight: 0 }}>
             {/* Drop zone */}
             <div
-              onDragEnter={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-              onDragLeave={(e) => { e.preventDefault(); setIsDragging(false); }}
-              onDrop={(e) => { e.preventDefault(); setIsDragging(false); addPendingFiles(e.dataTransfer.files); }}
+              onDragEnter={e => { e.preventDefault(); setIsDragging(true); }}
+              onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={e => { e.preventDefault(); setIsDragging(false); }}
+              onDrop={e => { e.preventDefault(); setIsDragging(false); addPendingFiles(e.dataTransfer.files); }}
               style={{ border: `1.5px dashed ${isDragging ? "var(--navy)" : "#cbc7b8"}`, background: isDragging ? "var(--navy-tint-soft)" : "var(--panel-deep)", borderRadius: 12, padding: "28px 18px", textAlign: "center", transition: "all .15s ease" }}
             >
               <div style={{ color: "var(--navy)", display: "inline-flex" }}><Upload size={28} aria-hidden="true" /></div>
               <div className="serif" style={{ fontSize: 16, marginTop: 10, color: "var(--navy-deep)", fontWeight: 600, letterSpacing: "0.04em" }}>ここにファイルを置く</div>
               <div className="small soft" style={{ marginTop: 4 }}>または下のボタンで選択</div>
               <input ref={fileInputRef} type="file" multiple style={{ display: "none" }} accept=".pdf,.doc,.docx,.txt,.md,image/*,video/*"
-                onChange={(e) => { if (e.target.files) addPendingFiles(e.target.files); e.currentTarget.value = ""; }} />
+                onChange={e => { if (e.target.files) addPendingFiles(e.target.files); e.currentTarget.value = ""; }} />
               <Button variant="secondary" size="sm" style={{ marginTop: 14 }} onClick={() => fileInputRef.current?.click()}>
                 <Plus size={13} aria-hidden="true" />ファイルを選択
               </Button>
@@ -505,7 +604,7 @@ export function FileRepositoryManager() {
                         <span className="truncate" style={{ fontSize: 12.5, fontWeight: 500 }}>{file.name}</span>
                         <span className="tiny soft">{formatFileSize(file.size)}</span>
                       </div>
-                      <button type="button" className="btn ghost sm icon" onClick={() => setPendingFiles((cur) => cur.filter((_, i) => i !== idx))} title="選択から外す">
+                      <button type="button" className="btn ghost sm icon" onClick={() => setPendingFiles(cur => cur.filter((_, i) => i !== idx))} title="選択から外す">
                         <X size={13} aria-hidden="true" />
                       </button>
                     </li>
@@ -516,31 +615,24 @@ export function FileRepositoryManager() {
 
             <div className="divider" />
 
-            {/* Destination folder */}
+            {/* Destination folder picker */}
             <FieldLabel>保存先フォルダー</FieldLabel>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <FolderSelect
-                value={destCat}
-                onChange={setDestCat}
-                options={library.map((c) => ({ id: c.id, label: c.label }))}
-                placeholder="カテゴリーを選択"
-              />
-              <FolderSelect
-                value={destSub}
-                onChange={setDestSub}
-                options={(currentCat?.subs || []).map((s) => ({ id: s.id, label: s.label }))}
-                placeholder="フォルダーを選択"
-                disabled={!currentCat || (currentCat?.subs || []).length === 0}
-              />
+            <div style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden auto", maxHeight: 140, background: "#fff" }}>
+              <button type="button" onClick={() => setDestFolderId(null)}
+                style={{ width: "100%", textAlign: "left", padding: "7px 12px", fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 6, background: destFolderId === null ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: destFolderId === null ? "var(--navy)" : "var(--ink-soft)", fontWeight: destFolderId === null ? 600 : 400 }}>
+                <Folder size={12} />未整理（フォルダーなし）
+              </button>
+              {pickerFolders.map(({ id, name, depth }) => (
+                <button key={id} type="button" onClick={() => setDestFolderId(id)}
+                  style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 6, background: destFolderId === id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: destFolderId === id ? "var(--navy)" : "var(--ink-soft)", fontWeight: destFolderId === id ? 600 : 400 }}>
+                  <Folder size={12} />{name}
+                </button>
+              ))}
             </div>
-            {currentCat && (currentCat.subs || []).length === 0 ? (
-              <p className="tiny soft" style={{ marginTop: 6 }}>このカテゴリーにはフォルダーがありません。資料庫で追加してください。</p>
-            ) : null}
 
             <div className="divider" />
-
             <FieldLabel>メモ（任意）</FieldLabel>
-            <input className="input" placeholder="任意" value={memo} onChange={(e) => setMemo(e.target.value)} />
+            <input className="input" placeholder="任意" value={memo} onChange={e => setMemo(e.target.value)} />
 
             {notice ? <p className="tag accent" style={{ marginTop: 14, display: "block" }}>{notice}</p> : null}
             <Button style={{ width: "100%", marginTop: 20, height: 44 }} onClick={registerFiles} disabled={isUploading}>
@@ -553,122 +645,88 @@ export function FileRepositoryManager() {
 
         {/* ── Library panel (right) ── */}
         <section className="panel" style={{ display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
-          {/* Library header */}
-          <div style={{ padding: "16px 22px", borderBottom: "1px solid var(--line)", display: "flex", flexDirection: "column", gap: 12, flexShrink: 0 }}>
+          {/* Header */}
+          <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexShrink: 0 }}>
             {/* Breadcrumb */}
-            <nav className="row" style={{ gap: 4, fontSize: 13, flexWrap: "wrap" }}>
-              <Crumb active={path.length === 0} onClick={() => setPath([])}>資料庫</Crumb>
-              {cat ? (<><CrumbSep /><Crumb active={path.length === 1} onClick={() => setPath([cat.id])}>{cat.label}</Crumb></>) : null}
-              {sub ? (<><CrumbSep /><Crumb active={path.length === 2} onClick={() => setPath([cat!.id, sub.id])}>{sub.label}</Crumb></>) : null}
+            <nav style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", minWidth: 0 }}>
+              <Crumb active={selectedFolderId === null} onClick={() => setSelectedFolderId(null)}>資料庫</Crumb>
+              {ancestors.map(f => (
+                <span key={f.id} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <CrumbSep />
+                  <Crumb active={selectedFolderId === f.id} onClick={() => setSelectedFolderId(f.id)}>{f.name}</Crumb>
+                </span>
+              ))}
             </nav>
-            <div className="between" style={{ gap: 12, flexWrap: "wrap" }}>
-              <div className="stack" style={{ minWidth: 0 }}>
-                {!cat ? (
-                  <>
-                    <span className="panel-title">資料庫</span>
-                    <span className="panel-sub">{isLoadingFiles ? "読み込み中…" : "カテゴリーから資料をたどる"}</span>
-                  </>
-                ) : !sub ? (
-                  <>
-                    <InlineEdit value={cat.label} onSave={(v) => renameCategory(cat.id, v)} className="panel-title" />
-                    <InlineEdit value={cat.sub || "説明を追加"} placeholder="ひとことの説明" onSave={(v) => renameCategorySub(cat.id, v)} className="panel-sub" isPlaceholder={!cat.sub} />
-                  </>
-                ) : (
-                  <>
-                    <InlineEdit value={sub.label} onSave={(v) => renameSub(cat!.id, sub.id, v)} className="panel-title" />
-                    <span className="panel-sub">{cat?.label}</span>
-                  </>
-                )}
-              </div>
-              <div className="row" style={{ gap: 8 }}>
-                <div style={{ position: "relative" }}>
-                  <Search size={14} style={{ position: "absolute", left: 12, top: 12, color: "var(--ink-muted)" }} aria-hidden="true" />
-                  <input className="input" placeholder="資料庫全体から探す" value={libQuery} onChange={(e) => setLibQuery(e.target.value)} style={{ paddingLeft: 34, height: 38, width: 200 }} />
-                </div>
-              </div>
+            <div style={{ position: "relative", flexShrink: 0 }}>
+              <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-muted)", pointerEvents: "none" }} aria-hidden="true" />
+              <input className="input" placeholder="資料庫全体から探す" value={libQuery} onChange={e => setLibQuery(e.target.value)} style={{ paddingLeft: 32, height: 36, width: 200 }} />
             </div>
           </div>
 
-          {/* Folder tree + content */}
+          {/* Body: sidebar + content */}
           <div style={{ flex: 1, display: "grid", gridTemplateColumns: "200px 1fr", minHeight: 0, overflow: "hidden" }}>
-            <FolderTree
-              library={library}
-              path={path}
-              expanded={expanded}
-              setExpanded={setExpanded}
-              onNavigate={setPath}
-              filesInFolder={filesInFolder}
-              filesInCategory={filesInCategory}
-              drag={dragCtx}
-            />
-            <div style={{ overflowY: "auto", minHeight: 0, borderLeft: "1px solid var(--line)" }}>
+
+            {/* Sidebar */}
+            <div
+              style={{ overflowY: "auto", background: "var(--panel-deep)", borderRight: "1px solid var(--line)", display: "flex", flexDirection: "column" }}
+              onDragOver={e => { e.preventDefault(); setDropTargetId("__root__"); }}
+              onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTargetId(null); }}
+              onDrop={e => {
+                e.preventDefault(); setDropTargetId(null);
+                if (e.dataTransfer.files?.length) dragCtx.onExternalDrop(e.dataTransfer.files, null);
+                else if (draggedId) dragCtx.onDropFile(draggedId, null);
+              }}
+            >
+              <div style={{ flex: 1, overflowY: "auto", padding: "10px 6px" }}>
+                {/* Root entry */}
+                <div
+                  onClick={() => { setSelectedFolderId(null); setFolderMenuId(null); }}
+                  style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 8px", borderRadius: 6, cursor: "pointer", marginBottom: 2, background: dropTargetId === "__root__" ? "var(--navy)" : selectedFolderId === null ? "var(--navy-tint)" : "transparent", color: dropTargetId === "__root__" ? "#fff" : selectedFolderId === null ? "var(--navy-deep)" : "var(--ink-soft)", fontWeight: selectedFolderId === null ? 600 : 500, fontSize: 12.5, letterSpacing: "0.02em" }}
+                  onMouseEnter={e => { if (selectedFolderId !== null && dropTargetId !== "__root__") e.currentTarget.style.background = "var(--navy-tint-soft)"; }}
+                  onMouseLeave={e => { if (selectedFolderId !== null && dropTargetId !== "__root__") e.currentTarget.style.background = "transparent"; }}
+                >
+                  <Folder size={13} style={{ color: dropTargetId === "__root__" ? "#fff" : "var(--navy)", flexShrink: 0 }} />
+                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>資料庫</span>
+                </div>
+
+                {renderFolderTree(null, 0)}
+                {addingParentId === null && newFolderInputRow(0)}
+              </div>
+              <div style={{ padding: 8, borderTop: "1px solid var(--line)", flexShrink: 0 }}>
+                <button type="button"
+                  onClick={() => { setAddingParentId(null); setNewFolderName(""); }}
+                  style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", border: "1px dashed var(--line)", borderRadius: 6, background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 12 }}>
+                  <Plus size={12} />フォルダ作成
+                </button>
+              </div>
+            </div>
+
+            {/* Content area */}
+            <div style={{ overflowY: "auto", minHeight: 0 }}>
               {searching ? (
-                <SearchResults hits={searchHits} onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile} onProcessImages={processImages} query={libQuery} summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} drag={dragCtx} />
-              ) : !cat ? (
-                <CategoryGrid
-                  library={library}
-                  onPick={(c) => setPath([c.id])}
-                  onAdd={addCategory}
-                  onRename={renameCategory}
-                  onDelete={deleteCategory}
-                  filesInCategory={filesInCategory}
-                  drag={dragCtx}
-                  unassignedFiles={unassignedFiles}
-                  onOpenSummary={openOrCreateSummary}
-                  onDetail={openDetail}
-                  onDeleteFile={deleteFile}
-                  onProcessImages={processImages}
-                                   summaryProcessingId={summaryProcessingId}
-                  blockedSummaryId={blockedSummaryId}
-                  deletingId={deletingId}
-                 
-                />
-              ) : !sub ? (
-                <>
-                  <SubcategoryView
-                    cat={cat}
-                    onPick={(s) => setPath([cat!.id, s.id])}
-                    onAdd={(label) => addSub(cat!.id, label)}
-                    onRename={(subId, label) => renameSub(cat!.id, subId, label)}
-                    onDelete={(subId) => deleteSub(cat!.id, subId)}
-                    filesInFolder={filesInFolder}
-                    drag={dragCtx}
-                  />
-                  {filesInCategoryAll(cat!.id).length > 0 ? (
-                    <div style={{ padding: "0 20px 20px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-                        <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-                        <span className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.12em", fontWeight: 600, whiteSpace: "nowrap" }}>
-                          {cat!.label} の資料 ({filesInCategoryAll(cat!.id).length} 件)
-                        </span>
-                        <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-                        {filesInCategoryAll(cat!.id).map((f) => (
-                          <DraggableFileCard key={f.id} file={f} drag={dragCtx}
-                            onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile}
-                            onProcessImages={processImages}
-                            summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </>
+                <SearchResults hits={searchHits} query={libQuery}
+                  onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile}
+                  onProcessImages={processImages} summaryProcessingId={summaryProcessingId}
+                  blockedSummaryId={blockedSummaryId} deletingId={deletingId} drag={dragCtx} />
               ) : (
-                <FileGrid
-                  cat={cat}
-                  sub={sub}
-                  files={filesInSub}
+                <FolderContentView
+                  subFolders={subFolders}
+                  allFolders={folders}
+                  files={folderFiles}
+                  assignments={assignments}
+                  onSelectFolder={id => { setSelectedFolderId(id); setExpandedIds(p => new Set([...p, id])); }}
+                  onRenameFolder={renameFolder}
+                  onDeleteFolder={deleteFolder}
+                  drag={dragCtx}
                   onOpenSummary={openOrCreateSummary}
                   onDetail={openDetail}
                   onDelete={deleteFile}
                   onProcessImages={processImages}
-                                   summaryProcessingId={summaryProcessingId}
+                  summaryProcessingId={summaryProcessingId}
                   blockedSummaryId={blockedSummaryId}
                   deletingId={deletingId}
-                 
-                  drag={dragCtx}
+                  isLoadingFiles={isLoadingFiles}
+                  selectedFolderId={selectedFolderId}
                 />
               )}
             </div>
@@ -676,241 +734,154 @@ export function FileRepositoryManager() {
         </section>
       </div>
 
-      {/* ── Overlays ── */}
+      {/* Overlays */}
       {selectedDetail && detailDraft ? (
-        <DetailOverlay file={selectedDetail} draft={detailDraft} saving={detailSaving} library={library} onDraft={setDetailDraft} onSave={saveDetail} onOpenSource={() => setSourceViewerFile(selectedDetail)} onClose={() => setSelectedDetail(null)} />
+        <DetailOverlay file={selectedDetail} draft={detailDraft} saving={detailSaving}
+          folders={folders} onDraft={setDetailDraft} onSave={saveDetail}
+          onOpenSource={() => setSourceViewerFile(selectedDetail)} onClose={() => setSelectedDetail(null)} />
       ) : null}
-      {sourceViewerFile ? (
-        <SourceViewerOverlay file={sourceViewerFile} onClose={() => setSourceViewerFile(null)} />
-      ) : null}
+      {sourceViewerFile ? <SourceViewerOverlay file={sourceViewerFile} onClose={() => setSourceViewerFile(null)} /> : null}
       {selectedSummary ? (
-        <SummaryOverlay file={selectedSummary} draft={summaryDraft} editing={summaryEditing} copied={summaryCopied} processing={summaryProcessingId === selectedSummary.id} onDraft={setSummaryDraft} onEdit={() => setSummaryEditing(true)} onSave={saveSummary} onCopy={copySummary} onClose={() => setSelectedSummary(null)} />
+        <SummaryOverlay file={selectedSummary} draft={summaryDraft} editing={summaryEditing}
+          copied={summaryCopied} processing={summaryProcessingId === selectedSummary.id}
+          onDraft={setSummaryDraft} onEdit={() => setSummaryEditing(true)} onSave={saveSummary}
+          onCopy={copySummary} onClose={() => setSelectedSummary(null)} />
       ) : null}
     </>
   );
 }
 
-// ── Shared folder select ────────────────────────────────────────
-function FolderSelect({ value, onChange, options, placeholder, disabled }: {
-  value: string; onChange: (v: string) => void;
-  options: { id: string; label: string }[];
-  placeholder: string; disabled?: boolean;
-}) {
-  return (
-    <div style={{ position: "relative" }}>
-      <select value={value} onChange={(e) => onChange(e.target.value)} disabled={disabled} className="input"
-        style={{ appearance: "none", paddingRight: 28, cursor: disabled ? "not-allowed" : "pointer", background: "#fff", opacity: disabled ? 0.55 : 1 }}>
-        {!value ? <option value="">{placeholder}</option> : null}
-        {options.map((o) => <option key={o.id} value={o.id}>{o.label}</option>)}
-      </select>
-      <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%) rotate(90deg)", color: "var(--ink-muted)", pointerEvents: "none" }}>
-        <ChevronRight size={12} />
-      </span>
-    </div>
-  );
-}
-
-// ── Drag context type ───────────────────────────────────────────
-type DragCtx = {
-  draggedId: string | null;
-  setDraggedId: (id: string | null) => void;
-  dropTarget: { cat: string; sub: string | null } | null;
-  setDropTarget: (t: { cat: string; sub: string | null } | null) => void;
-  moveFile: (fileId: string, catId: string, subId: string | null) => void;
-  onExternalDrop: (files: FileList, catId: string, subId: string | null) => void;
+const treeMenuItemSt: React.CSSProperties = {
+  width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12,
+  border: "none", background: "none", cursor: "pointer", color: "var(--ink)", whiteSpace: "nowrap",
 };
 
-// ── Folder tree (left sidebar) ──────────────────────────────────
-function FolderTree({ library, path, expanded, setExpanded, onNavigate, filesInFolder, filesInCategory, drag }: {
-  library: LibraryCategory[];
-  path: string[];
-  expanded: Record<string, boolean>;
-  setExpanded: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-  onNavigate: (p: string[]) => void;
-  filesInFolder: (catId: string, subId: string) => number;
-  filesInCategory: (catId: string) => number;
-  drag: DragCtx;
+// ── Folder content view ──────────────────────────────────────────
+function FolderContentView({
+  subFolders, allFolders, files, assignments, onSelectFolder, onRenameFolder, onDeleteFolder,
+  drag, onOpenSummary, onDetail, onDelete, onProcessImages,
+  summaryProcessingId, blockedSummaryId, deletingId, isLoadingFiles, selectedFolderId,
+}: {
+  subFolders: RepoFolder[]; allFolders: RepoFolder[]; files: RepositoryFile[];
+  assignments: FileAssignments;
+  onSelectFolder: (id: string) => void;
+  onRenameFolder: (id: string, name: string) => void;
+  onDeleteFolder: (id: string) => void;
+  drag: DragCtx; onOpenSummary: (f: RepositoryFile) => void; onDetail: (f: RepositoryFile) => void;
+  onDelete: (f: RepositoryFile) => void; onProcessImages: (f: RepositoryFile) => void;
+  summaryProcessingId: string | null; blockedSummaryId: string | null; deletingId: string | null;
+  isLoadingFiles: boolean; selectedFolderId: string | null;
 }) {
-  return (
-    <div style={{ overflowY: "auto", padding: "12px 10px", background: "var(--panel-deep)", minHeight: 0 }}>
-      <TreeNode label="資料庫" isRoot active={path.length === 0} onClick={() => onNavigate([])} />
-      {library.map((c) => {
-        const isExpanded = !!expanded[c.id];
-        const isActive = path[0] === c.id && path.length === 1;
-        return (
-          <Fragment key={c.id}>
-            <TreeNode
-              label={c.label} count={filesInCategory(c.id)} active={isActive}
-              chevron={c.subs.length > 0 ? (isExpanded ? "down" : "right") : undefined}
-              onChevron={() => setExpanded((e) => ({ ...e, [c.id]: !e[c.id] }))}
-              onClick={() => { onNavigate([c.id]); if (!isExpanded) setExpanded((e) => ({ ...e, [c.id]: true })); }}
-              drag={drag} dropCat={c.id} dropSub={null}
-            />
-            {isExpanded ? c.subs.map((s) => (
-              <TreeNode
-                key={s.id} label={s.label} count={filesInFolder(c.id, s.id)}
-                active={path[0] === c.id && path[1] === s.id}
-                onClick={() => onNavigate([c.id, s.id])}
-                indent={2} drag={drag} dropCat={c.id} dropSub={s.id}
-              />
-            )) : null}
-          </Fragment>
-        );
-      })}
-    </div>
-  );
-}
+  const [over, setOver] = useState(false);
 
-function TreeNode({ label, count, active, onClick, chevron, onChevron, indent = 1, isRoot, drag, dropCat, dropSub }: {
-  label: string; count?: number; active?: boolean; onClick: () => void;
-  chevron?: "down" | "right"; onChevron?: () => void;
-  indent?: number; isRoot?: boolean;
-  drag?: DragCtx; dropCat?: string; dropSub?: string | null;
-}) {
-  const acceptsDrop = !!(drag && dropCat);
-  const isDropTarget = acceptsDrop && drag.dropTarget?.cat === dropCat && drag.dropTarget?.sub === (dropSub ?? null);
+  const isEmpty = subFolders.length === 0 && files.length === 0 && !isLoadingFiles;
 
-  function handleOver(e: React.DragEvent) {
-    if (!acceptsDrop) return;
-    e.preventDefault();
-    drag.setDropTarget({ cat: dropCat!, sub: dropSub ?? null });
-  }
-  function handleDrop(e: React.DragEvent) {
-    if (!acceptsDrop) return;
-    e.preventDefault();
-    drag.setDropTarget(null);
-    if (e.dataTransfer.files?.length && drag.onExternalDrop) {
-      drag.onExternalDrop(e.dataTransfer.files, dropCat!, dropSub ?? null);
-    } else if (drag.draggedId) {
-      drag.moveFile(drag.draggedId, dropCat!, dropSub ?? null);
-    }
+  function folderFileCount(fid: string): number {
+    return Object.values(assignments).filter(v => v === fid).length
+      + allFolders.filter(f => f.parentId === fid).length;
   }
 
   return (
     <div
-      onClick={onClick}
-      onDragOver={dropCat ? handleOver : undefined}
-      onDragLeave={dropCat ? () => drag?.setDropTarget(null) : undefined}
-      onDrop={dropCat ? handleDrop : undefined}
-      style={{
-        display: "flex", alignItems: "center", gap: 4,
-        padding: `5px ${8 * indent}px 5px ${8 * indent}px`,
-        borderRadius: 6, cursor: "pointer", marginBottom: 1,
-        background: isDropTarget ? "var(--navy)" : active ? "var(--navy-tint)" : "transparent",
-        color: isDropTarget ? "#fff" : active ? "var(--navy-deep)" : "var(--ink-soft)",
-        fontWeight: active || isRoot ? 600 : 500, fontSize: 12.5, letterSpacing: "0.02em",
-        outline: isDropTarget ? "2px solid var(--navy-deep)" : "none", outlineOffset: -2,
-        transition: "background .1s ease"
-      }}
-      onMouseEnter={(e) => { if (!active && !isDropTarget) e.currentTarget.style.background = "var(--navy-tint-soft)"; }}
-      onMouseLeave={(e) => { if (!active && !isDropTarget) e.currentTarget.style.background = "transparent"; }}
+      style={{ padding: 20, minHeight: "100%" }}
+      onDragOver={e => { if (Array.from(e.dataTransfer.types).includes("Files")) { e.preventDefault(); setOver(true); } }}
+      onDragLeave={() => setOver(false)}
+      onDrop={e => { if (e.dataTransfer.files?.length) { e.preventDefault(); setOver(false); drag.onExternalDrop(e.dataTransfer.files, selectedFolderId); } }}
     >
-      {chevron ? (
-        <button onClick={(e) => { e.stopPropagation(); onChevron?.(); }}
-          style={{ background: "transparent", border: 0, color: "inherit", cursor: "pointer", padding: 0, width: 14, height: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", transform: chevron === "down" ? "rotate(90deg)" : "none", transition: "transform .15s ease" }}>
-          <ChevronRight size={11} />
-        </button>
-      ) : (
-        <span style={{ width: 14, display: "inline-block" }} />
-      )}
-      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-      {typeof count === "number" && count > 0 ? (
-        <span style={{ fontSize: 10, color: isDropTarget ? "rgba(255,255,255,0.8)" : "var(--ink-faint)", fontVariantNumeric: "tabular-nums" }}>{count}</span>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Category grid (root) ────────────────────────────────────────
-function CategoryGrid({ library, onPick, onAdd, onRename, onDelete, filesInCategory, drag, unassignedFiles, onOpenSummary, onDetail, onDeleteFile, onProcessImages,summaryProcessingId, blockedSummaryId, deletingId }: {
-  library: LibraryCategory[];
-  onPick: (c: LibraryCategory) => void;
-  onAdd: (label: string) => void;
-  onRename: (id: string, label: string) => void;
-  onDelete: (id: string) => void;
-  filesInCategory: (catId: string) => number;
-  drag: DragCtx;
-  unassignedFiles: RepositoryFile[];
-  onOpenSummary: (f: RepositoryFile) => void;
-  onDetail: (f: RepositoryFile) => void;
-  onDeleteFile: (f: RepositoryFile) => void;
-  onProcessImages: (f: RepositoryFile) => void;
-  summaryProcessingId: string | null;
-  blockedSummaryId: string | null;
-  deletingId: string | null;
- 
-}) {
-  return (
-    <div style={{ padding: 20 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
-        {library.map((c) => (
-          <CategoryCard key={c.id} cat={c} fileCount={filesInCategory(c.id)} onClick={() => onPick(c)} onRename={(v) => onRename(c.id, v)} onDelete={() => onDelete(c.id)} drag={drag} />
-        ))}
-        <AddCategoryCard onAdd={onAdd} />
-      </div>
-      {unassignedFiles.length > 0 ? (
-        <div style={{ marginTop: 28 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
-            <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-            <span className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.12em", fontWeight: 600, whiteSpace: "nowrap" }}>
-              未整理 ({unassignedFiles.length} 件) — フォルダーにドラッグして整理
-            </span>
-            <div style={{ flex: 1, height: 1, background: "var(--line)" }} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-            {unassignedFiles.map((f) => (
-              <DraggableFileCard
-                key={f.id} file={f} drag={drag}
-                onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDeleteFile}
-                onProcessImages={onProcessImages}
-                summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
-              />
-            ))}
-          </div>
+      {isLoadingFiles && files.length === 0 && subFolders.length === 0 ? (
+        <div style={{ padding: "60px 24px", textAlign: "center", color: "var(--ink-muted)" }}>
+          <div className="serif" style={{ fontSize: 16 }}>読み込み中…</div>
         </div>
-      ) : null}
+      ) : isEmpty ? (
+        <div style={{ padding: "80px 24px", textAlign: "center", border: `1.5px dashed ${over ? "var(--navy)" : "var(--line)"}`, background: over ? "var(--navy-tint-soft)" : "transparent", borderRadius: 12, transition: "all .12s ease" }}>
+          <div className="serif" style={{ fontSize: 18, color: "var(--ink-soft)", marginBottom: 8 }}>
+            {over ? "ここにドロップして追加" : "このフォルダにはまだ資料がありません"}
+          </div>
+          <div className="small soft">PCからファイルを直接ドロップ、または他のフォルダからドラッグで移動できます。</div>
+        </div>
+      ) : (
+        <>
+          {subFolders.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14, marginBottom: files.length > 0 ? 24 : 0 }}>
+              {subFolders.map(folder => (
+                <RepoFolderCard
+                  key={folder.id}
+                  folder={folder}
+                  fileCount={folderFileCount(folder.id)}
+                  isDropTarget={drag.dropTargetId === folder.id}
+                  isDragging={false}
+                  onClick={() => onSelectFolder(folder.id)}
+                  onRename={name => onRenameFolder(folder.id, name)}
+                  onDelete={() => onDeleteFolder(folder.id)}
+                  onDragOver={e => { e.preventDefault(); drag.setDropTargetId(folder.id); }}
+                  onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) drag.setDropTargetId(null); }}
+                  onDrop={e => {
+                    e.preventDefault(); drag.setDropTargetId(null);
+                    if (e.dataTransfer.files?.length) drag.onExternalDrop(e.dataTransfer.files, folder.id);
+                    else if (drag.draggedId) drag.onDropFile(drag.draggedId, folder.id);
+                  }}
+                />
+              ))}
+            </div>
+          )}
+          {files.length > 0 && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14, outline: over ? "2px dashed var(--navy)" : "none", outlineOffset: 6, borderRadius: 8, padding: over ? 4 : 0 }}>
+              {files.map(f => (
+                <DraggableFileCard key={f.id} file={f} drag={drag}
+                  onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDelete}
+                  onProcessImages={onProcessImages}
+                  summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function CategoryCard({ cat, fileCount, onClick, onRename, onDelete, drag }: {
-  cat: LibraryCategory; fileCount: number; onClick: () => void;
-  onRename: (v: string) => void; onDelete: () => void; drag: DragCtx;
+// ── Repo folder card ─────────────────────────────────────────────
+function RepoFolderCard({ folder, fileCount, isDropTarget, isDragging, onClick, onRename, onDelete, onDragOver, onDragLeave, onDrop }: {
+  folder: RepoFolder; fileCount: number; isDropTarget: boolean; isDragging: boolean;
+  onClick: () => void; onRename: (name: string) => void; onDelete: () => void;
+  onDragOver: (e: React.DragEvent) => void;
+  onDragLeave: (e: React.DragEvent) => void;
+  onDrop: (e: React.DragEvent) => void;
 }) {
   const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(cat.label);
+  const [draft, setDraft] = useState(folder.name);
   const [hover, setHover] = useState(false);
 
-  const dropSub = cat.subs[0]?.id || null;
-  const isDropTarget = drag.dropTarget?.cat === cat.id && drag.dropTarget?.sub === dropSub;
-
-  function handleOver(e: React.DragEvent) { e.preventDefault(); drag.setDropTarget({ cat: cat.id, sub: dropSub }); }
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault(); drag.setDropTarget(null);
-    if (e.dataTransfer.files?.length) drag.onExternalDrop(e.dataTransfer.files, cat.id, dropSub);
-    else if (drag.draggedId) drag.moveFile(drag.draggedId, cat.id, dropSub);
+  function commit() {
+    const v = draft.trim();
+    if (v && v !== folder.name) onRename(v);
+    setRenaming(false);
   }
-  function commit() { const v = draft.trim(); if (v && v !== cat.label) onRename(v); setRenaming(false); }
 
   return (
     <div
       onClick={() => !renaming && onClick()}
-      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      onDragOver={handleOver} onDragLeave={() => drag.setDropTarget(null)} onDrop={handleDrop}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       style={{
         background: isDropTarget ? "var(--navy-tint)" : "var(--panel)",
         border: `1px solid ${isDropTarget ? "var(--navy)" : hover ? "var(--navy-soft)" : "var(--line)"}`,
         outline: isDropTarget ? "2px solid var(--navy)" : "none", outlineOffset: -2,
-        borderRadius: 12, padding: "18px 16px 14px", cursor: renaming ? "default" : "pointer",
-        position: "relative", display: "flex", flexDirection: "column", gap: 12, minHeight: 140,
+        borderRadius: 12, padding: "18px 16px 14px",
+        cursor: renaming ? "default" : "pointer", position: "relative",
+        display: "flex", flexDirection: "column", gap: 12, minHeight: 140,
+        opacity: isDragging ? 0.4 : 1,
         transition: "border-color .15s ease, transform .15s ease, box-shadow .15s ease",
         boxShadow: hover ? "var(--shadow-md)" : "none",
-        transform: hover ? "translateY(-2px)" : "translateY(0)"
+        transform: hover ? "translateY(-2px)" : "translateY(0)",
       }}
     >
       {/* Actions */}
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 2, opacity: hover && !drag.draggedId ? 1 : 0, transition: "opacity .15s ease", background: "var(--panel)", borderRadius: 6, padding: 2, border: "1px solid var(--line)" }}>
-        <SmallIconButton title="名前を変更" onClick={() => { setDraft(cat.label); setRenaming(true); }}><Edit size={12} /></SmallIconButton>
+      <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 2, opacity: hover && !renaming ? 1 : 0, transition: "opacity .15s ease", background: "var(--panel)", borderRadius: 6, padding: 2, border: "1px solid var(--line)" }}>
+        <SmallIconButton title="名前を変更" onClick={() => { setDraft(folder.name); setRenaming(true); }}><Edit size={12} /></SmallIconButton>
         <SmallIconButton title="削除" onClick={onDelete} danger><Trash2 size={12} /></SmallIconButton>
       </div>
 
@@ -918,201 +889,24 @@ function CategoryCard({ cat, fileCount, onClick, onRename, onDelete, drag }: {
 
       <div className="stack" style={{ gap: 4, flex: 1 }}>
         {renaming ? (
-          <input autoFocus className="input" value={draft} onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit} onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setRenaming(false); }}
+          <input autoFocus className="input" value={draft} onChange={e => setDraft(e.target.value)}
+            onBlur={commit} onClick={e => e.stopPropagation()}
+            onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") setRenaming(false); }}
             style={{ height: 32, padding: "0 8px", fontSize: 15 }} />
         ) : (
-          <span className="serif" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", letterSpacing: "0.04em", lineHeight: 1.3 }}>{cat.label}</span>
+          <span className="serif" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", letterSpacing: "0.04em", lineHeight: 1.3 }}>{folder.name}</span>
         )}
-        {cat.sub ? <span className="tiny soft" style={{ letterSpacing: "0.04em" }}>{cat.sub}</span> : null}
       </div>
 
       <div className="between" style={{ paddingTop: 10, borderTop: "1px solid var(--line-soft)", fontSize: 11, color: "var(--ink-muted)", letterSpacing: "0.04em" }}>
-        <span>{cat.subs.length} フォルダー ・ {fileCount} 件</span>
+        <span>{fileCount} 件</span>
         <ChevronRight size={13} style={{ color: "var(--navy-soft)" }} />
       </div>
     </div>
   );
 }
 
-function AddCategoryCard({ onAdd }: { onAdd: (label: string) => void }) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-  function commit() { if (draft.trim()) onAdd(draft); setDraft(""); setAdding(false); }
-
-  if (adding) {
-    return (
-      <div style={{ background: "var(--panel)", border: "1.5px dashed var(--navy-soft)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 10, minHeight: 140, justifyContent: "center" }}>
-        <input autoFocus className="input" placeholder="カテゴリー名" value={draft} onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(""); setAdding(false); } }} />
-        <div className="row" style={{ gap: 6 }}>
-          <Button size="sm" onClick={commit}>追加</Button>
-          <Button variant="ghost" size="sm" onClick={() => { setDraft(""); setAdding(false); }}>キャンセル</Button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <button type="button" onClick={() => setAdding(true)}
-      style={{ background: "transparent", border: "1.5px dashed var(--line)", borderRadius: 12, padding: 14, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--ink-muted)", minHeight: 140, transition: "all .15s ease" }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--navy-soft)"; e.currentTarget.style.color = "var(--navy-deep)"; e.currentTarget.style.background = "var(--navy-tint-soft)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.color = "var(--ink-muted)"; e.currentTarget.style.background = "transparent"; }}>
-      <span style={{ width: 36, height: 36, borderRadius: 10, background: "rgba(0,0,0,0.03)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}><Plus size={18} /></span>
-      <span className="serif" style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.04em" }}>カテゴリーを追加</span>
-    </button>
-  );
-}
-
-// ── Subcategory view ────────────────────────────────────────────
-function SubcategoryView({ cat, onPick, onAdd, onRename, onDelete, filesInFolder, drag }: {
-  cat: LibraryCategory;
-  onPick: (s: LibrarySub) => void;
-  onAdd: (label: string) => void;
-  onRename: (subId: string, label: string) => void;
-  onDelete: (subId: string) => void;
-  filesInFolder: (catId: string, subId: string) => number;
-  drag: DragCtx;
-}) {
-  return (
-    <div style={{ padding: "20px 22px" }}>
-      <div style={{ padding: "14px 18px", background: "var(--navy-tint-soft)", borderRadius: 12, marginBottom: 18, border: "1px solid var(--navy-tint)" }}>
-        <span className="tiny" style={{ color: "var(--accent)", fontWeight: 600, letterSpacing: "0.14em", textTransform: "uppercase" }}>カテゴリー</span>
-        <div className="serif" style={{ fontSize: 20, fontWeight: 600, color: "var(--navy-deep)", letterSpacing: "0.04em", marginTop: 2 }}>{cat.label}</div>
-        {cat.sub ? <div className="small soft" style={{ marginTop: 2 }}>{cat.sub}</div> : null}
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-        {cat.subs.map((s) => (
-          <SubcategoryCard key={s.id} catId={cat.id} sub={s} fileCount={filesInFolder(cat.id, s.id)} onClick={() => onPick(s)} onRename={(v) => onRename(s.id, v)} onDelete={() => onDelete(s.id)} drag={drag} />
-        ))}
-        <AddSubCard onAdd={onAdd} />
-      </div>
-    </div>
-  );
-}
-
-function SubcategoryCard({ catId, sub, fileCount, onClick, onRename, onDelete, drag }: {
-  catId: string; sub: LibrarySub; fileCount: number; onClick: () => void;
-  onRename: (v: string) => void; onDelete: () => void; drag: DragCtx;
-}) {
-  const [renaming, setRenaming] = useState(false);
-  const [draft, setDraft] = useState(sub.label);
-  const [hover, setHover] = useState(false);
-
-  const isDropTarget = drag.dropTarget?.cat === catId && drag.dropTarget?.sub === sub.id;
-  function handleOver(e: React.DragEvent) { e.preventDefault(); drag.setDropTarget({ cat: catId, sub: sub.id }); }
-  function handleDrop(e: React.DragEvent) {
-    e.preventDefault(); drag.setDropTarget(null);
-    if (e.dataTransfer.files?.length) drag.onExternalDrop(e.dataTransfer.files, catId, sub.id);
-    else if (drag.draggedId) drag.moveFile(drag.draggedId, catId, sub.id);
-  }
-  function commit() { const v = draft.trim(); if (v && v !== sub.label) onRename(v); setRenaming(false); }
-
-  return (
-    <div onClick={() => !renaming && onClick()} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
-      onDragOver={handleOver} onDragLeave={() => drag.setDropTarget(null)} onDrop={handleDrop}
-      style={{
-        background: isDropTarget ? "var(--navy-tint)" : hover ? "var(--navy-tint-soft)" : "var(--panel)",
-        border: `1px solid ${isDropTarget ? "var(--navy)" : hover ? "var(--navy-soft)" : "var(--line)"}`,
-        outline: isDropTarget ? "2px solid var(--navy)" : "none", outlineOffset: -2,
-        borderRadius: 10, padding: "14px 16px", cursor: renaming ? "default" : "pointer",
-        display: "flex", alignItems: "center", gap: 12, position: "relative", transition: "all .12s ease"
-      }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ position: "absolute", top: 6, right: 6, display: "flex", gap: 2, opacity: hover && !drag.draggedId ? 1 : 0, transition: "opacity .15s ease", background: "var(--panel)", borderRadius: 6, padding: 2, border: "1px solid var(--line)" }}>
-        <SmallIconButton title="名前を変更" onClick={() => { setDraft(sub.label); setRenaming(true); }}><Edit size={11} /></SmallIconButton>
-        <SmallIconButton title="削除" onClick={onDelete} danger><Trash2 size={11} /></SmallIconButton>
-      </div>
-      <FolderGlyph open={hover || isDropTarget} />
-      <div className="stack" style={{ flex: 1, minWidth: 0, gap: 2 }}>
-        {renaming ? (
-          <input autoFocus className="input" value={draft} onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit} onClick={(e) => e.stopPropagation()}
-            onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setRenaming(false); }}
-            style={{ height: 32, padding: "0 8px", fontSize: 14 }} />
-        ) : (
-          <span className="serif truncate" style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink)", letterSpacing: "0.02em" }}>{sub.label}</span>
-        )}
-        <span className="tiny soft" style={{ letterSpacing: "0.04em" }}>{fileCount} 件</span>
-      </div>
-    </div>
-  );
-}
-
-function AddSubCard({ onAdd }: { onAdd: (label: string) => void }) {
-  const [adding, setAdding] = useState(false);
-  const [draft, setDraft] = useState("");
-  function commit() { if (draft.trim()) onAdd(draft); setDraft(""); setAdding(false); }
-
-  if (adding) {
-    return (
-      <div style={{ background: "var(--panel)", border: "1.5px dashed var(--navy-soft)", borderRadius: 10, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <input autoFocus className="input" placeholder="フォルダー名" value={draft} onChange={(e) => setDraft(e.target.value)}
-          onBlur={commit} onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") { setDraft(""); setAdding(false); } }}
-          style={{ height: 32, padding: "0 8px" }} />
-        <div className="row" style={{ gap: 6 }}>
-          <Button size="sm" onClick={commit}>追加</Button>
-          <Button variant="ghost" size="sm" onClick={() => { setDraft(""); setAdding(false); }}>キャンセル</Button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <button type="button" onClick={() => setAdding(true)}
-      style={{ background: "transparent", border: "1.5px dashed var(--line)", borderRadius: 10, padding: "14px 16px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, color: "var(--ink-muted)", transition: "all .15s ease" }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--navy-soft)"; e.currentTarget.style.color = "var(--navy-deep)"; e.currentTarget.style.background = "var(--navy-tint-soft)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.color = "var(--ink-muted)"; e.currentTarget.style.background = "transparent"; }}>
-      <Plus size={14} />
-      <span className="serif" style={{ fontSize: 13, fontWeight: 600, letterSpacing: "0.04em" }}>フォルダーを追加</span>
-    </button>
-  );
-}
-
-// ── File grid (subfolder) ───────────────────────────────────────
-type FileGridCommonProps = {
-  onOpenSummary: (f: RepositoryFile) => void;
-  onDetail: (f: RepositoryFile) => void;
-  onDelete: (f: RepositoryFile) => void;
-  onProcessImages: (f: RepositoryFile) => void;
-  summaryProcessingId: string | null;
-  blockedSummaryId: string | null;
-  deletingId: string | null;
-  drag: DragCtx;
-};
-
-function FileGrid({ cat, sub, files, ...props }: FileGridCommonProps & { cat: LibraryCategory; sub: LibrarySub; files: RepositoryFile[] }) {
-  const [over, setOver] = useState(false);
-
-  function handleOver(e: React.DragEvent) {
-    const types = e.dataTransfer.types;
-    if (Array.from(types).includes("Files")) { e.preventDefault(); setOver(true); }
-  }
-  function handleDrop(e: React.DragEvent) {
-    if (e.dataTransfer.files?.length) {
-      e.preventDefault(); setOver(false);
-      props.drag.onExternalDrop(e.dataTransfer.files, cat.id, sub.id);
-    }
-  }
-
-  return (
-    <div style={{ padding: 20, minHeight: "100%" }} onDragOver={handleOver} onDragLeave={() => setOver(false)} onDrop={handleDrop}>
-      {files.length === 0 ? (
-        <div style={{ padding: "80px 24px", textAlign: "center", border: `1.5px dashed ${over ? "var(--navy)" : "var(--line)"}`, background: over ? "var(--navy-tint-soft)" : "transparent", borderRadius: 12, transition: "all .12s ease" }}>
-          <div className="serif" style={{ fontSize: 18, color: "var(--ink-soft)", marginBottom: 8 }}>
-            {over ? "ここにドロップして追加" : "このフォルダーにはまだ資料がありません"}
-          </div>
-          <div className="small soft">PCからファイルを直接ドロップ、または他のフォルダーからドラッグで移動できます。</div>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14, outline: over ? "2px dashed var(--navy)" : "none", outlineOffset: 6, borderRadius: 8, padding: over ? 4 : 0 }}>
-          {files.map((f) => (
-            <DraggableFileCard key={f.id} file={f} {...props} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
+// ── Search results ───────────────────────────────────────────────
 function SearchResults({ hits, query, ...props }: FileGridCommonProps & { hits: RepositoryFile[]; query: string }) {
   return (
     <div style={{ padding: 20 }}>
@@ -1127,25 +921,23 @@ function SearchResults({ hits, query, ...props }: FileGridCommonProps & { hits: 
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 14 }}>
-          {hits.map((f) => <DraggableFileCard key={f.id} file={f} {...props} />)}
+          {hits.map(f => <DraggableFileCard key={f.id} file={f} {...props} />)}
         </div>
       )}
     </div>
   );
 }
 
+// ── File card ────────────────────────────────────────────────────
 function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail, onDelete, onProcessImages }: FileGridCommonProps & { file: RepositoryFile; processing?: boolean; blocked?: boolean; deleting?: boolean }) {
-  const needsOcr = file.textExtractionStatus === "ocr_required";
   const canSummary = file.preparationStatus === "completed";
   const summaryInProgress = file.summaryStatus === "processing" || processing;
-  const imageProcessing = file.imageProcessingStatus === "processing";
-  const imageFailed = file.imageProcessingStatus === "failed";
-  const canProcessImages = file.contentType.includes("pdf") && file.preparationStatus === "completed";
+  const needsOcr = file.textExtractionStatus === "ocr_required";
 
   return (
     <article style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12, position: "relative", transition: "border-color .15s ease, transform .15s ease, box-shadow .15s ease" }}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--navy-soft)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "translateY(0)"; }}>
+      onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--navy-soft)"; e.currentTarget.style.boxShadow = "var(--shadow-md)"; e.currentTarget.style.transform = "translateY(-1px)"; }}
+      onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--line)"; e.currentTarget.style.boxShadow = "none"; e.currentTarget.style.transform = "translateY(0)"; }}>
       <div className="row" style={{ alignItems: "flex-start", gap: 14 }}>
         <FilePreview file={file} />
         <div className="stack" style={{ minWidth: 0, flex: 1, gap: 6 }}>
@@ -1156,7 +948,7 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
       </div>
       {file.tags.length > 0 ? (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {file.tags.map((t) => <span className="tag" key={t}>{t}</span>)}
+          {file.tags.map(t => <span className="tag" key={t}>{t}</span>)}
         </div>
       ) : null}
       <div className="row" style={{ gap: 4, fontSize: 11, color: "var(--ink-muted)", flexWrap: "wrap" }}>
@@ -1174,7 +966,9 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
         {file.version ? <><span style={{ color: "var(--ink-faint)" }}>・</span><span>{file.version}</span></> : null}
       </div>
       <div className="row" style={{ gap: 6, borderTop: "1px solid var(--line-soft)", paddingTop: 12 }}>
-        <Button variant={file.summaryStatus === "completed" ? "secondary" : canSummary ? "primary" : "secondary"} size="sm" style={{ flex: 1, opacity: canSummary || file.summaryStatus === "completed" ? 1 : 0.58 }} disabled={!!summaryInProgress} onClick={() => onOpenSummary(file)}>
+        <Button variant={file.summaryStatus === "completed" ? "secondary" : canSummary ? "primary" : "secondary"} size="sm"
+          style={{ flex: 1, opacity: canSummary || file.summaryStatus === "completed" ? 1 : 0.58 }}
+          disabled={!!summaryInProgress} onClick={() => onOpenSummary(file)}>
           {summaryInProgress ? "要約作成中" : file.summaryStatus === "completed" ? "要約を見る" : "要約をつくる"}
         </Button>
         <Button variant="ghost" size="sm" onClick={() => onDetail(file)}><Edit size={13} aria-hidden="true" />詳細</Button>
@@ -1189,25 +983,24 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
   );
 }
 
-function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deletingId,  onOpenSummary, onDetail, onDelete, onProcessImages,drag }: FileGridCommonProps & { file: RepositoryFile }) {
+function DraggableFileCard({ file, summaryProcessingId, blockedSummaryId, deletingId, onOpenSummary, onDetail, onDelete, onProcessImages, drag }: FileGridCommonProps & { file: RepositoryFile }) {
   return (
-    <div draggable onDragStart={(e) => { drag.setDraggedId(file.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", file.id); }}
-      onDragEnd={() => { drag.setDraggedId(null); drag.setDropTarget(null); }}
+    <div draggable
+      onDragStart={e => { drag.setDraggedId(file.id); e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", file.id); }}
+      onDragEnd={() => { drag.setDraggedId(null); drag.setDropTargetId(null); }}
       style={{ opacity: drag.draggedId === file.id ? 0.4 : 1, cursor: "grab", transition: "opacity .12s ease" }}>
-      <FileCard
-        file={file} drag={drag}
+      <FileCard file={file} drag={drag}
         processing={summaryProcessingId === file.id}
         blocked={blockedSummaryId === file.id}
         deleting={deletingId === file.id}
         onOpenSummary={onOpenSummary} onDetail={onDetail} onDelete={onDelete}
         onProcessImages={onProcessImages}
-        summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId}
-      />
+        summaryProcessingId={summaryProcessingId} blockedSummaryId={blockedSummaryId} deletingId={deletingId} />
     </div>
   );
 }
 
-// ── Small helpers ───────────────────────────────────────────────
+// ── Small helpers ────────────────────────────────────────────────
 function FolderGlyph({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 32 24" width={36} height={28} fill="none" stroke="var(--navy-deep)" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
@@ -1226,8 +1019,8 @@ function SmallIconButton({ children, onClick, title, danger }: { children: React
   return (
     <button type="button" onClick={onClick} title={title}
       style={{ width: 22, height: 22, borderRadius: 4, border: 0, background: "transparent", color: danger ? "#8a3a2d" : "var(--ink-soft)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = danger ? "#f3e3df" : "var(--navy-tint-soft)"; e.currentTarget.style.color = danger ? "#7a2d22" : "var(--navy-deep)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = danger ? "#8a3a2d" : "var(--ink-soft)"; }}>
+      onMouseEnter={e => { e.currentTarget.style.background = danger ? "#f3e3df" : "var(--navy-tint-soft)"; e.currentTarget.style.color = danger ? "#7a2d22" : "var(--navy-deep)"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = danger ? "#8a3a2d" : "var(--ink-soft)"; }}>
       {children}
     </button>
   );
@@ -1242,9 +1035,7 @@ function Crumb({ children, onClick, active }: { children: React.ReactNode; onCli
   );
 }
 
-function CrumbSep() {
-  return <ChevronRight size={12} style={{ color: "var(--ink-faint)" }} />;
-}
+function CrumbSep() { return <ChevronRight size={12} style={{ color: "var(--ink-faint)" }} />; }
 
 function InlineEdit({ value, placeholder, onSave, className, isPlaceholder }: {
   value: string; placeholder?: string; onSave: (v: string) => void; className?: string; isPlaceholder?: boolean;
@@ -1252,28 +1043,26 @@ function InlineEdit({ value, placeholder, onSave, className, isPlaceholder }: {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
-
   function commit() { const v = draft.trim(); if (v && v !== value) onSave(v); setEditing(false); }
-
   if (editing) {
     return (
-      <input autoFocus className="input" value={draft} onChange={(e) => setDraft(e.target.value)}
+      <input autoFocus className="input" value={draft} onChange={e => setDraft(e.target.value)}
         onBlur={commit}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
+        onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); commit(); } if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
         style={{ height: 32, padding: "0 8px", fontSize: 14 }} />
     );
   }
   return (
     <span className={className} onClick={() => setEditing(true)}
       style={{ cursor: "text", borderRadius: 4, padding: "1px 4px", margin: "0 -4px", color: isPlaceholder ? "var(--ink-faint)" : undefined, fontStyle: isPlaceholder ? "italic" : undefined }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--navy-tint-soft)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+      onMouseEnter={e => (e.currentTarget.style.background = "var(--navy-tint-soft)")}
+      onMouseLeave={e => (e.currentTarget.style.background = "transparent")}>
       {value || placeholder}
     </span>
   );
 }
 
-// ── FilePreview (unchanged) ─────────────────────────────────────
+// ── FilePreview ──────────────────────────────────────────────────
 function FilePreview({ file }: { file: RepositoryFile }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [failed, setFailed] = useState(false);
@@ -1320,9 +1109,8 @@ function ImageGalleryOverlay({ gallery, onClose }: {
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "stretch", justifyContent: "flex-end" }}
-      onClick={(e) => { if (e.target === e.currentTarget) { setSelected(null); onClose(); } }}>
+      onClick={e => { if (e.target === e.currentTarget) { setSelected(null); onClose(); } }}>
       <div style={{ width: "min(860px, 95vw)", background: "#fff", display: "flex", flexDirection: "column", boxShadow: "-4px 0 24px rgba(0,0,0,.18)" }}>
-        {/* ヘッダー */}
         <div className="panel-head" style={{ flexShrink: 0 }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "var(--navy-deep)" }}>{gallery.file.name.replace(/\.[^.]+$/, "")}</div>
@@ -1330,9 +1118,7 @@ function ImageGalleryOverlay({ gallery, onClose }: {
           </div>
           <button type="button" onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-soft)", padding: 4 }}><X size={18} /></button>
         </div>
-
         <div style={{ flex: 1, overflow: "hidden", display: "flex", minHeight: 0 }}>
-          {/* サムネイルグリッド */}
           <div style={{ width: 200, flexShrink: 0, overflowY: "auto", borderRight: "1px solid var(--line)", padding: 8, display: "flex", flexDirection: "column", gap: 6 }}>
             {gallery.images.map((img, i) => (
               <button key={i} type="button" onClick={() => setSelected(i)}
@@ -1342,19 +1128,13 @@ function ImageGalleryOverlay({ gallery, onClose }: {
               </button>
             ))}
           </div>
-
-          {/* メインビュー */}
           <div style={{ flex: 1, overflowY: "auto", padding: 20, display: "flex", flexDirection: "column", gap: 16 }}>
             {selectedImage ? (
               <>
                 <img src={selectedImage.url} alt={`画像${selectedImage.index + 1}`} style={{ maxWidth: "100%", height: "auto", borderRadius: 8, border: "1px solid var(--line)", display: "block" }} />
                 <div>
-                  <div className="tiny" style={{ color: "var(--ink-muted)", marginBottom: 6, letterSpacing: "0.08em" }}>
-                    {selectedImage.page}ページ目・画像{selectedImage.index + 1}
-                  </div>
-                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.8, color: "var(--ink)", background: "var(--panel-deep)", borderRadius: 8, padding: "12px 14px" }}>
-                    {selectedImage.description}
-                  </p>
+                  <div className="tiny" style={{ color: "var(--ink-muted)", marginBottom: 6, letterSpacing: "0.08em" }}>{selectedImage.page}ページ目・画像{selectedImage.index + 1}</div>
+                  <p style={{ margin: 0, fontSize: 13, lineHeight: 1.8, color: "var(--ink)", background: "var(--panel-deep)", borderRadius: 8, padding: "12px 14px" }}>{selectedImage.description}</p>
                 </div>
               </>
             ) : (
@@ -1370,10 +1150,10 @@ function ImageGalleryOverlay({ gallery, onClose }: {
   );
 }
 
-// ── Overlays ────────────────────────────────────────────────────
-function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSource, onClose }: {
+// ── Detail overlay ───────────────────────────────────────────────
+function DetailOverlay({ file, draft, saving, folders, onDraft, onSave, onOpenSource, onClose }: {
   file: RepositoryFile; draft: DetailDraft; saving: boolean;
-  library: LibraryCategory[];
+  folders: RepoFolder[];
   onDraft: React.Dispatch<React.SetStateAction<DetailDraft | null>>;
   onSave: () => void; onOpenSource: () => void; onClose: () => void;
 }) {
@@ -1384,7 +1164,6 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
     return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = ""; };
   }, [onClose]);
 
-  // 画像ギャラリー（デフォルト非表示）
   const [showImages, setShowImages] = useState(false);
   const [detailImages, setDetailImages] = useState<{ index: number; page: number; description: string; url: string }[]>([]);
   const [selectedImgIndex, setSelectedImgIndex] = useState<number | null>(null);
@@ -1399,16 +1178,11 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
       .catch(() => {});
   }, [showImages, file.id, file.imageCount, detailImages.length]);
 
-  const selectedCat = library.find((c) => c.id === draft.catId);
-
-  function handleCatChange(catId: string) {
-    const cat = library.find((c) => c.id === catId);
-    onDraft((cur) => cur ? { ...cur, catId, subId: cat?.subs[0]?.id ?? "" } : cur);
-  }
+  const pickerFolders = flattenForPicker(folders, new Set(), null, 0);
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 920, background: "var(--panel)", borderRadius: 16, overflow: "hidden", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease", maxHeight: "calc(100vh - 64px)", display: "flex", flexDirection: "column" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 920, background: "var(--panel)", borderRadius: 16, overflow: "hidden", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease", maxHeight: "calc(100vh - 64px)", display: "flex", flexDirection: "column" }}>
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 18, alignItems: "center", padding: "20px 24px", borderBottom: "1px solid var(--line)", background: "var(--panel-deep)" }}>
           <FilePreview file={file} />
           <div className="stack" style={{ minWidth: 0 }}>
@@ -1423,24 +1197,21 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
             <Button variant="secondary" size="sm" onClick={onOpenSource}>原本を見る</Button>
           </div>
           <FieldLabel>保存先フォルダー</FieldLabel>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-            <FolderSelect
-              value={draft.catId}
-              onChange={handleCatChange}
-              options={library.map((c) => ({ id: c.id, label: c.label }))}
-              placeholder="カテゴリーを選択"
-            />
-            <FolderSelect
-              value={draft.subId}
-              onChange={(subId) => onDraft((cur) => cur ? { ...cur, subId } : cur)}
-              options={(selectedCat?.subs || []).map((s) => ({ id: s.id, label: s.label }))}
-              placeholder="フォルダーを選択"
-              disabled={!selectedCat || (selectedCat.subs || []).length === 0}
-            />
+          <div style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden auto", maxHeight: 160, marginBottom: 16 }}>
+            <button type="button" onClick={() => onDraft(cur => cur ? { ...cur, folderId: null } : cur)}
+              style={{ width: "100%", textAlign: "left", padding: "7px 12px", fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 6, background: draft.folderId === null ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: draft.folderId === null ? "var(--navy)" : "var(--ink-soft)", fontWeight: draft.folderId === null ? 600 : 400 }}>
+              <Folder size={12} />未整理（フォルダーなし）
+            </button>
+            {pickerFolders.map(({ id, name, depth }) => (
+              <button key={id} type="button" onClick={() => onDraft(cur => cur ? { ...cur, folderId: id } : cur)}
+                style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 6, background: draft.folderId === id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: draft.folderId === id ? "var(--navy)" : "var(--ink-soft)", fontWeight: draft.folderId === id ? 600 : 400 }}>
+                <Folder size={12} />{name}
+              </button>
+            ))}
           </div>
-          <div style={{ marginTop: 16 }}>
+          <div style={{ marginTop: 4 }}>
             <FieldLabel>メモ</FieldLabel>
-            <textarea className="textarea" value={draft.memo} placeholder="資料の補足、運用メモなど" style={{ minHeight: 110 }} onChange={(e) => onDraft((cur) => cur ? { ...cur, memo: e.target.value } : cur)} />
+            <textarea className="textarea" value={draft.memo} placeholder="資料の補足、運用メモなど" style={{ minHeight: 110 }} onChange={e => onDraft(cur => cur ? { ...cur, memo: e.target.value } : cur)} />
           </div>
           <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
             <MetaRow label="AI参照" value={file.preparationStatus === "completed" ? "可" : file.preparationStatus || "未開始"} />
@@ -1465,48 +1236,25 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
               </div>
             ) : null}
           </div>
-
-          {/* 画像ギャラリー（showImages=trueのときのみ表示） */}
           {showImages && detailImages.length > 0 ? (
             <div style={{ marginTop: 20, borderTop: "1px solid var(--line-soft)", paddingTop: 16 }}>
-              <div className="tiny" style={{ letterSpacing: "0.14em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 10 }}>
-                資料内の画像（{detailImages.length}枚）
-              </div>
-              {/* サムネイルグリッド */}
+              <div className="tiny" style={{ letterSpacing: "0.14em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 10 }}>資料内の画像（{detailImages.length}枚）</div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {detailImages.map((img, i) => (
-                  <button
-                    key={i} type="button"
-                    onClick={() => setSelectedImgIndex(selectedImgIndex === i ? null : i)}
-                    style={{
-                      border: `2px solid ${selectedImgIndex === i ? "var(--navy)" : "var(--line)"}`,
-                      borderRadius: 8, padding: 0, background: "none", cursor: "pointer",
-                      overflow: "hidden", flexShrink: 0,
-                    }}
-                  >
-                    <img src={img.url} alt={`p.${img.page}`}
-                      style={{ width: 80, height: 64, objectFit: "cover", display: "block" }} />
-                    <div style={{ fontSize: 9, color: "var(--ink-muted)", padding: "2px 4px", textAlign: "center" }}>
-                      p.{img.page}
-                    </div>
+                  <button key={i} type="button" onClick={() => setSelectedImgIndex(selectedImgIndex === i ? null : i)}
+                    style={{ border: `2px solid ${selectedImgIndex === i ? "var(--navy)" : "var(--line)"}`, borderRadius: 8, padding: 0, background: "none", cursor: "pointer", overflow: "hidden", flexShrink: 0 }}>
+                    <img src={img.url} alt={`p.${img.page}`} style={{ width: 80, height: 64, objectFit: "cover", display: "block" }} />
+                    <div style={{ fontSize: 9, color: "var(--ink-muted)", padding: "2px 4px", textAlign: "center" }}>p.{img.page}</div>
                   </button>
                 ))}
               </div>
-              {/* 選択した画像の拡大表示 */}
               {selectedImgIndex !== null && detailImages[selectedImgIndex] ? (
                 <div style={{ marginTop: 12, border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden" }}>
-                  <img
-                    src={detailImages[selectedImgIndex].url}
-                    alt={detailImages[selectedImgIndex].description}
-                    style={{ width: "100%", maxHeight: 360, objectFit: "contain", display: "block", background: "#f8f9fa" }}
-                  />
+                  <img src={detailImages[selectedImgIndex].url} alt={detailImages[selectedImgIndex].description}
+                    style={{ width: "100%", maxHeight: 360, objectFit: "contain", display: "block", background: "#f8f9fa" }} />
                   <div style={{ padding: "10px 14px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)" }}>
-                    <div className="tiny soft" style={{ marginBottom: 4 }}>
-                      {detailImages[selectedImgIndex].page}ページ目
-                    </div>
-                    <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.7 }}>
-                      {detailImages[selectedImgIndex].description}
-                    </p>
+                    <div className="tiny soft" style={{ marginBottom: 4 }}>{detailImages[selectedImgIndex].page}ページ目</div>
+                    <p style={{ margin: 0, fontSize: 12.5, color: "var(--ink-soft)", lineHeight: 1.7 }}>{detailImages[selectedImgIndex].description}</p>
                   </div>
                 </div>
               ) : null}
@@ -1522,6 +1270,7 @@ function DetailOverlay({ file, draft, saving, library, onDraft, onSave, onOpenSo
   );
 }
 
+// ── Source viewer overlay ────────────────────────────────────────
 function SourceViewerOverlay({ file, onClose }: { file: RepositoryFile; onClose: () => void }) {
   const [previewUrl, setPreviewUrl] = useState("");
   const [failed, setFailed] = useState(false);
@@ -1549,7 +1298,7 @@ function SourceViewerOverlay({ file, onClose }: { file: RepositoryFile; onClose:
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(1180px, calc(100vw - 40px))", height: "calc(100vh - 56px)", background: "var(--panel)", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "min(1180px, calc(100vw - 40px))", height: "calc(100vh - 56px)", background: "var(--panel)", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease" }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 16, padding: "14px 18px", borderBottom: "1px solid var(--line)", background: "var(--panel-deep)" }}>
           <div className="stack" style={{ minWidth: 0 }}>
             <span className="tiny" style={{ letterSpacing: "0.18em", color: "var(--accent)", fontWeight: 600, textTransform: "uppercase" }}>原本</span>
@@ -1578,6 +1327,7 @@ function SourceViewerOverlay({ file, onClose }: { file: RepositoryFile; onClose:
   );
 }
 
+// ── Summary overlay ──────────────────────────────────────────────
 function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onEdit, onSave, onCopy, onClose }: {
   file: RepositoryFile; draft: string; editing: boolean; copied: boolean; processing: boolean;
   onDraft: (v: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onClose: () => void;
@@ -1591,7 +1341,7 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
 
   return (
     <div className="overlay" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 1080, background: "var(--panel)", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease", maxHeight: "calc(100vh - 64px)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 1080, background: "var(--panel)", borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", boxShadow: "var(--shadow-lg)", animation: "slide-up .25s ease", maxHeight: "calc(100vh - 64px)" }}>
         <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 20, alignItems: "center", padding: "20px 28px", borderBottom: "1px solid var(--line)", background: "var(--panel-deep)" }}>
           <FileSpine name={file.name} ext={file.thumbnailLabel || "FILE"} version={file.version} size="sm" />
           <div className="stack" style={{ minWidth: 0 }}>
@@ -1601,7 +1351,7 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
               <span className="tiny soft">{file.summaryUpdatedAt ? `最終更新 ${formatDisplayDate(file.summaryUpdatedAt)}` : "最終更新 —"}</span>
             </div>
             <h2 className="serif truncate" style={{ margin: "4px 0 2px", fontSize: 20, fontWeight: 600, color: "var(--navy-deep)", letterSpacing: "0.04em" }}>{file.name.replace(/\.[^.]+$/, "")}</h2>
-            {file.tags.length > 0 ? <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{file.tags.map((t) => <span className="tag" key={t}>{t}</span>)}</div> : null}
+            {file.tags.length > 0 ? <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>{file.tags.map(t => <span className="tag" key={t}>{t}</span>)}</div> : null}
           </div>
           <div className="row" style={{ gap: 6 }}>
             <Button variant="secondary" size="sm" onClick={onCopy}>{copied ? <Check size={13} /> : <Clipboard size={13} />}{copied ? "コピーしました" : "コピー"}</Button>
@@ -1619,7 +1369,7 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
             {file.memo ? <><div className="divider" style={{ margin: "16px 0" }} /><div className="tiny" style={{ letterSpacing: "0.18em", color: "var(--ink-muted)", fontWeight: 600, textTransform: "uppercase", marginBottom: 8 }}>メモ</div><p style={{ fontSize: 13, color: "var(--ink-soft)", lineHeight: 1.7, margin: 0 }}>{file.memo}</p></> : null}
           </aside>
           <div style={{ overflowY: "auto", padding: "32px 44px" }}>
-            {editing ? <textarea value={draft} onChange={(e) => onDraft(e.target.value)} className="textarea" style={{ minHeight: "60vh", fontSize: 14, lineHeight: 1.85, fontFamily: "inherit" }} /> : <div className="prose"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown></div>}
+            {editing ? <textarea value={draft} onChange={e => onDraft(e.target.value)} className="textarea" style={{ minHeight: "60vh", fontSize: 14, lineHeight: 1.85, fontFamily: "inherit" }} /> : <div className="prose"><ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown></div>}
           </div>
         </div>
       </div>
@@ -1627,6 +1377,7 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
   );
 }
 
+// ── Utilities ────────────────────────────────────────────────────
 function MetaRow({ label, value }: { label: string; value: string }) {
   return (
     <div style={{ display: "grid", gridTemplateColumns: "70px 1fr", gap: 10, padding: "6px 0", borderBottom: "1px solid var(--line-soft)" }}>
@@ -1636,7 +1387,6 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-// ── Conversion helpers ──────────────────────────────────────────
 function toRepositoryFile(m: StoredFileMetadata): RepositoryFile {
   return {
     id: m.id, name: m.fileName, contentType: m.contentType,
