@@ -8,7 +8,7 @@ import { Button } from "@/components/ui";
 
 type ChatImage = { url: string; description: string; page: number; documentName: string };
 type ChatMessage = { role: "user" | "assistant"; text: string; images?: ChatImage[] };
-type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" | "insurance" };
 
 const ALLOWED_MIME_TYPES = [
   "image/jpeg",
@@ -69,7 +69,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   useEffect(() => {
     fetch("/api/chat-sessions")
       .then((r) => r.json())
-      .then((data: { sessions: SessionSummary[] }) => setSessions(data.sessions ?? []))
+      .then((data: { sessions: SessionSummary[] }) =>
+        setSessions((data.sessions ?? []).filter(s => s.type !== "insurance"))
+      )
       .catch(() => {});
   }, []);
 

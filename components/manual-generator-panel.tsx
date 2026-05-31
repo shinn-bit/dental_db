@@ -63,7 +63,7 @@ type UploadQueue = {
   placementText: string;
 };
 
-type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" };
+type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" | "insurance" };
 type RepoFolder = { id: string; name: string; parentId: string | null };
 
 function flattenFoldersForPicker(
@@ -595,7 +595,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     fetch("/api/chat-sessions")
       .then(r => r.json())
       .then((data: { sessions: SessionSummary[] }) => {
-        setSessions(data.sessions ?? []);
+        setSessions((data.sessions ?? []).filter(s => s.type !== "insurance"));
       })
       .catch(() => {});
   }, []);

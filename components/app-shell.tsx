@@ -10,6 +10,7 @@ const navItems = [
   { href: "/manual", label: "解説書作成" },
   { href: "/repository", label: "資料庫" },
   { href: "/manual-repository", label: "保管庫" },
+  { href: "/insurance", label: "保険請求" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
