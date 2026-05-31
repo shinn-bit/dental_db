@@ -545,6 +545,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
   const [saveTitle, setSaveTitle] = useState("");
   const [saveFolderId, setSaveFolderId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [notice, setNotice] = useState("");
@@ -958,19 +959,23 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
   async function openSaveModal() {
     setSaveTitle(generatedTheme || "");
     setSaveFolderId(null);
+    setSaveError(null);
     setShowSaveModal(true);
-    if (repoFolders.length === 0) {
+    try {
       const data = await fetch("/api/manual-repository").then(r => r.json()) as { folders: RepoFolder[] };
       setRepoFolders(data.folders ?? []);
+    } catch {
+      // フォルダ取得失敗時はルート保存のみ可能
     }
   }
 
   async function saveToRepository() {
     if (!saveTitle.trim() || saving) return;
     setSaving(true);
+    setSaveError(null);
     try {
       if (repoItemId) {
-        await fetch("/api/manual-repository", {
+        const res = await fetch("/api/manual-repository", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -979,6 +984,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
             ...(generatedOutputType === "slide" && slidesHtml[0] ? { firstSlideHtml: slidesHtml[0] } : {}),
           }),
         });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(err.error ?? `HTTP ${res.status}`);
+        }
       } else {
         const res = await fetch("/api/manual-repository", {
           method: "POST",
@@ -995,14 +1004,18 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
             },
           }),
         });
-        const { id } = await res.json() as { id: string };
-        setRepoItemId(id);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({})) as { error?: string };
+          throw new Error(err.error ?? `HTTP ${res.status}`);
+        }
+        const data = await res.json() as { id: string };
+        setRepoItemId(data.id);
       }
       setShowSaveModal(false);
-      setNotice("保管庫に保存しました");
-      window.setTimeout(() => setNotice(n => n === "保管庫に保存しました" ? "" : n), 2000);
-    } catch {
-      setNotice("保存に失敗しました");
+      setNotice("✓ 保管庫に保存しました");
+      window.setTimeout(() => setNotice(n => n === "✓ 保管庫に保存しました" ? "" : n), 2500);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "保存に失敗しました");
     } finally {
       setSaving(false);
     }
@@ -1830,6 +1843,11 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
           <p style={{ margin: "0 0 16px", fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>
             {repoItemId ? "上書き保存" : "保管庫に保存"}
           </p>
+          {saveError ? (
+            <p style={{ margin: "0 0 12px", fontSize: 12, color: "#c53030", background: "#fff5f5", border: "1px solid #feb2b2", borderRadius: 6, padding: "8px 10px", lineHeight: 1.5 }}>
+              {saveError}
+            </p>
+          ) : null}
 
           {/* タイトル */}
           <label style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4, display: "block", letterSpacing: "0.06em" }}>

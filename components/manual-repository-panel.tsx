@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ChevronDown, ChevronRight, FileText, Folder, FolderOpen,
-  MoreHorizontal, Plus,
+  ChevronDown, ChevronRight, FileText, Folder, FolderOpen, MoreHorizontal, Plus,
 } from "lucide-react";
 
 type RepoFolder = { id: string; name: string; parentId: string | null };
@@ -51,11 +50,11 @@ function getBreadcrumb(folders: RepoFolder[], folderId: string | null): string[]
   return path;
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── Sub-components (defined OUTSIDE parent to avoid remount on re-render) ─────
 
 function SlidePreview({ html }: { html: string }) {
   return (
-    <div style={{ width: 192, height: 108, overflow: "hidden", flexShrink: 0, background: "#1a1a2e" }}>
+    <div style={{ width: 192, height: 108, overflow: "hidden", flexShrink: 0, background: "#111827" }}>
       <div
         style={{ width: 960, height: 540, transform: "scale(0.2)", transformOrigin: "top left", pointerEvents: "none" }}
         dangerouslySetInnerHTML={{ __html: html }}
@@ -64,9 +63,12 @@ function SlidePreview({ html }: { html: string }) {
   );
 }
 
-function ItemCard({
-  item, onOpen, onDelete, menuOpen, onMenuToggle,
-}: {
+const menuItemStyle: React.CSSProperties = {
+  width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12,
+  border: "none", background: "none", cursor: "pointer", color: "var(--ink)",
+};
+
+function ItemCard({ item, onOpen, onDelete, menuOpen, onMenuToggle }: {
   item: RepoItem;
   onOpen: () => void;
   onDelete: () => void;
@@ -76,12 +78,10 @@ function ItemCard({
   const date = new Date(item.savedAt).toLocaleDateString("ja-JP", { month: "numeric", day: "numeric" });
   return (
     <div
-      style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", background: "#fff", cursor: "pointer", position: "relative", transition: "box-shadow .12s ease" }}
+      style={{ border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", background: "#fff", cursor: "pointer", position: "relative" }}
       onClick={onOpen}
-      onMouseEnter={e => (e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,.10)")}
-      onMouseLeave={e => { e.currentTarget.style.boxShadow = "none"; if (menuOpen) onMenuToggle(); }}
+      onMouseLeave={() => { if (menuOpen) onMenuToggle(); }}
     >
-      {/* Preview */}
       <div style={{ height: 108, background: "#f0f4f8", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
         {item.type === "slide" && item.firstSlideHtml ? (
           <SlidePreview html={item.firstSlideHtml} />
@@ -89,8 +89,6 @@ function ItemCard({
           <FileText size={40} strokeWidth={1.1} style={{ color: "#7ba3cc" }} />
         )}
       </div>
-
-      {/* Info */}
       <div style={{ padding: "9px 10px" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 5 }}>
           {item.title}
@@ -99,34 +97,27 @@ function ItemCard({
           <span style={{ fontSize: 10, color: "var(--ink-muted)", background: "var(--navy-tint-soft, #eef2f8)", padding: "1px 6px", borderRadius: 8, whiteSpace: "nowrap" }}>
             {MODE_LABELS[item.docMode] ?? item.docMode}
           </span>
-          <span style={{ fontSize: 10, color: "var(--ink-muted)", marginLeft: "auto", whiteSpace: "nowrap" }}>{date}</span>
+          <span style={{ fontSize: 10, color: "var(--ink-muted)", marginLeft: "auto" }}>{date}</span>
         </div>
       </div>
-
-      {/* Menu */}
       <div style={{ position: "absolute", top: 6, right: 6 }} onClick={e => e.stopPropagation()}>
         <button
           type="button"
           onClick={onMenuToggle}
-          style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "rgba(255,255,255,0.88)", backdropFilter: "blur(4px)", borderRadius: 6, cursor: "pointer", color: "var(--ink-soft)" }}
+          style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "rgba(255,255,255,0.88)", borderRadius: 6, cursor: "pointer", color: "var(--ink-soft)" }}
         >
           <MoreHorizontal size={13} />
         </button>
-        {menuOpen ? (
+        {menuOpen && (
           <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 50, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 120, padding: "4px 0" }}>
             <button type="button" onClick={onOpen} style={menuItemStyle}>開いて編集</button>
             <button type="button" onClick={onDelete} style={{ ...menuItemStyle, color: "#c0392b" }}>削除</button>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );
 }
-
-const menuItemStyle: React.CSSProperties = {
-  width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12,
-  border: "none", background: "none", cursor: "pointer", color: "var(--ink)",
-};
 
 function ConfirmModal({ title, message, onCancel, onConfirm }: {
   title: string; message: string; onCancel: () => void; onConfirm: () => void;
@@ -165,13 +156,12 @@ export function ManualRepositoryPanel() {
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [editingFolderName, setEditingFolderName] = useState("");
 
+  // addingFolderParentId: undefined = not adding, null = adding at root, string = adding under folder
   const [addingFolderParentId, setAddingFolderParentId] = useState<string | null | undefined>(undefined);
   const [newFolderName, setNewFolderName] = useState("");
 
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
-
-  const newFolderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/manual-repository")
@@ -181,28 +171,34 @@ export function ManualRepositoryPanel() {
       .finally(() => setDataLoading(false));
   }, []);
 
-  useEffect(() => {
-    if (addingFolderParentId !== undefined) {
-      newFolderInputRef.current?.focus();
-    }
-  }, [addingFolderParentId]);
-
   async function api(body: object) {
     const res = await fetch("/api/manual-repository", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({})) as { error?: string };
+      throw new Error(err.error ?? `HTTP ${res.status}`);
+    }
     return res.json() as Promise<Record<string, unknown>>;
   }
 
   async function createFolder() {
     const name = newFolderName.trim();
-    if (!name) { setAddingFolderParentId(undefined); return; }
+    if (!name) {
+      setAddingFolderParentId(undefined);
+      setNewFolderName("");
+      return;
+    }
     const parentId = addingFolderParentId ?? null;
-    const { id } = await api({ action: "create-folder", name, parentId });
-    setCatalog(prev => ({ ...prev, folders: [...prev.folders, { id: id as string, name, parentId }] }));
-    if (parentId) setExpandedFolders(prev => new Set([...prev, parentId]));
+    try {
+      const { id } = await api({ action: "create-folder", name, parentId });
+      setCatalog(prev => ({ ...prev, folders: [...prev.folders, { id: id as string, name, parentId }] }));
+      if (parentId) setExpandedFolders(prev => new Set([...prev, parentId]));
+    } catch {
+      // silent — folder won't appear, user can retry
+    }
     setAddingFolderParentId(undefined);
     setNewFolderName("");
   }
@@ -210,14 +206,14 @@ export function ManualRepositoryPanel() {
   async function renameFolder(id: string, name: string) {
     const trimmed = name.trim();
     if (!trimmed) { setEditingFolderId(null); return; }
-    await api({ action: "rename-folder", id, name: trimmed });
+    await api({ action: "rename-folder", id, name: trimmed }).catch(() => {});
     setCatalog(prev => ({ ...prev, folders: prev.folders.map(f => f.id === id ? { ...f, name: trimmed } : f) }));
     setEditingFolderId(null);
   }
 
   async function deleteFolder(id: string) {
     const descendants = collectDescendants(catalog.folders, id);
-    await api({ action: "delete-folder", id });
+    await api({ action: "delete-folder", id }).catch(() => {});
     setCatalog(prev => ({
       folders: prev.folders.filter(f => !descendants.has(f.id)),
       items: prev.items.map(i => i.folderId && descendants.has(i.folderId) ? { ...i, folderId: null } : i),
@@ -228,7 +224,7 @@ export function ManualRepositoryPanel() {
   }
 
   async function deleteItem(id: string) {
-    await api({ action: "delete-item", id });
+    await api({ action: "delete-item", id }).catch(() => {});
     setCatalog(prev => ({ ...prev, items: prev.items.filter(i => i.id !== id) }));
     setDeleteItemId(null);
     setItemMenuId(null);
@@ -246,6 +242,47 @@ export function ManualRepositoryPanel() {
     router.push(`/manual?sessionId=${item.sessionId}&repoItemId=${item.id}`);
   }
 
+  // ── Folder input JSX (inline, not a component, to preserve focus on re-render) ──
+  function newFolderInputJsx(depth: number) {
+    const indent = 6 + depth * 14;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: `4px 4px 4px ${indent}px` }}>
+        <span style={{ width: 14, flexShrink: 0 }} />
+        <Folder size={13} style={{ color: "var(--navy)", flexShrink: 0 }} />
+        <input
+          // NOTE: autoFocus works here because this element is newly mounted when
+          // addingFolderParentId changes. Subsequent re-renders (from newFolderName
+          // updates) do NOT remount this element — it's plain JSX, not a React
+          // component defined inside the parent — so focus is preserved.
+          // eslint-disable-next-line jsx-a11y/no-autofocus
+          autoFocus
+          value={newFolderName}
+          onChange={e => setNewFolderName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter") { e.preventDefault(); createFolder(); }
+            if (e.key === "Escape") { setAddingFolderParentId(undefined); setNewFolderName(""); }
+          }}
+          placeholder="フォルダ名（Enterで確定）"
+          style={{ flex: 1, fontSize: 12, padding: "3px 6px", border: "1px solid var(--navy)", borderRadius: 4, outline: "none" }}
+        />
+        <button
+          type="button"
+          onClick={createFolder}
+          style={{ fontSize: 11, padding: "2px 8px", border: "1px solid var(--navy)", borderRadius: 4, background: "var(--navy)", color: "#fff", cursor: "pointer", flexShrink: 0 }}
+        >
+          確定
+        </button>
+        <button
+          type="button"
+          onClick={() => { setAddingFolderParentId(undefined); setNewFolderName(""); }}
+          style={{ fontSize: 11, padding: "2px 6px", border: "1px solid var(--line)", borderRadius: 4, background: "transparent", color: "var(--ink-muted)", cursor: "pointer", flexShrink: 0 }}
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
+
   // ── Folder tree renderer ──────────────────────────────────────────────────
 
   function renderFolderTree(parentId: string | null, depth: number): React.ReactNode {
@@ -256,11 +293,12 @@ export function ManualRepositoryPanel() {
         const isExpanded = expandedFolders.has(folder.id);
         const isSelected = selectedFolderId === folder.id;
         const itemCount = catalog.items.filter(i => i.folderId === folder.id).length;
+        const indent = 6 + depth * 14;
 
         return (
           <div key={folder.id}>
             <div
-              style={{ display: "flex", alignItems: "center", gap: 3, padding: `4px 4px 4px ${6 + depth * 14}px`, borderRadius: 6, background: isSelected ? "var(--navy-tint-soft, #eef2f8)" : "transparent", position: "relative" }}
+              style={{ display: "flex", alignItems: "center", gap: 3, padding: `4px 4px 4px ${indent}px`, borderRadius: 6, background: isSelected ? "var(--navy-tint-soft, #eef2f8)" : "transparent", position: "relative" }}
               onMouseLeave={() => { if (folderMenuId === folder.id) setFolderMenuId(null); }}
             >
               {editingFolderId === folder.id ? (
@@ -283,9 +321,7 @@ export function ManualRepositoryPanel() {
                     style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, background: "none", border: "none", cursor: "pointer", minWidth: 0, padding: 0 }}
                   >
                     <span style={{ width: 14, flexShrink: 0, display: "flex", justifyContent: "center", color: "var(--ink-faint)" }}>
-                      {hasChildren
-                        ? (isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />)
-                        : null}
+                      {hasChildren ? (isExpanded ? <ChevronDown size={11} /> : <ChevronRight size={11} />) : null}
                     </span>
                     {isExpanded
                       ? <FolderOpen size={13} style={{ color: "var(--navy)", flexShrink: 0 }} />
@@ -308,7 +344,7 @@ export function ManualRepositoryPanel() {
               )}
 
               {folderMenuId === folder.id && (
-                <div style={{ position: "absolute", left: "100%", top: 0, zIndex: 50, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 140, padding: "4px 0" }}>
+                <div style={{ position: "absolute", left: "calc(100% + 4px)", top: 0, zIndex: 50, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.12)", minWidth: 140, padding: "4px 0" }}>
                   <button type="button" onClick={() => { setAddingFolderParentId(folder.id); setNewFolderName(""); setExpandedFolders(p => new Set([...p, folder.id])); setFolderMenuId(null); }} style={menuItemStyle}>
                     サブフォルダ作成
                   </button>
@@ -325,35 +361,13 @@ export function ManualRepositoryPanel() {
             {isExpanded && (
               <>
                 {renderFolderTree(folder.id, depth + 1)}
-                {addingFolderParentId === folder.id && (
-                  <NewFolderRow depth={depth + 1} />
-                )}
+                {/* Inline JSX — NOT a React component — so focus is preserved on re-render */}
+                {addingFolderParentId === folder.id && newFolderInputJsx(depth + 1)}
               </>
             )}
           </div>
         );
       });
-  }
-
-  function NewFolderRow({ depth }: { depth: number }) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 4, padding: `4px 4px 4px ${6 + depth * 14}px` }}>
-        <span style={{ width: 14 }} />
-        <Folder size={13} style={{ color: "var(--navy)", flexShrink: 0 }} />
-        <input
-          ref={newFolderInputRef}
-          value={newFolderName}
-          onChange={e => setNewFolderName(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === "Enter") createFolder();
-            if (e.key === "Escape") { setAddingFolderParentId(undefined); setNewFolderName(""); }
-          }}
-          onBlur={createFolder}
-          placeholder="フォルダ名"
-          style={{ flex: 1, fontSize: 12, padding: "3px 6px", border: "1px solid var(--navy)", borderRadius: 4, outline: "none" }}
-        />
-      </div>
-    );
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -365,7 +379,7 @@ export function ManualRepositoryPanel() {
     <section className="panel" style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}>
 
       {/* ── Sidebar ── */}
-      <div style={{ width: 220, flexShrink: 0, borderRight: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--panel-deep, #f8f9fa)", borderRadius: "16px 0 0 16px", overflow: "hidden" }}>
+      <div style={{ width: 240, flexShrink: 0, borderRight: "1px solid var(--line)", display: "flex", flexDirection: "column", background: "var(--panel-deep, #f8f9fa)", borderRadius: "16px 0 0 16px", overflow: "hidden" }}>
         <div style={{ padding: "12px 10px 8px", borderBottom: "1px solid var(--line)", flexShrink: 0 }}>
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--navy-deep)", letterSpacing: "0.04em" }}>保管庫</span>
         </div>
@@ -390,8 +404,8 @@ export function ManualRepositoryPanel() {
           {/* Folder tree */}
           {renderFolderTree(null, 0)}
 
-          {/* New root-level folder input */}
-          {addingFolderParentId === null && <NewFolderRow depth={0} />}
+          {/* Root-level new folder input (inline JSX, not a component) */}
+          {addingFolderParentId === null && newFolderInputJsx(0)}
         </div>
 
         <div style={{ padding: 8, borderTop: "1px solid var(--line)", flexShrink: 0 }}>
@@ -408,7 +422,6 @@ export function ManualRepositoryPanel() {
 
       {/* ── Main area ── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        {/* Header / breadcrumb */}
         <div className="panel-head">
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span className="tiny soft">保管庫</span>
@@ -422,7 +435,6 @@ export function ManualRepositoryPanel() {
           <span className="tiny soft">{visibleItems.length} 件</span>
         </div>
 
-        {/* Items */}
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
           {dataLoading ? (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--ink-faint)", fontSize: 13 }}>
@@ -450,7 +462,6 @@ export function ManualRepositoryPanel() {
         </div>
       </div>
 
-      {/* ── Confirm dialogs ── */}
       {deleteItemId && (
         <ConfirmModal
           title="アイテムを削除"
