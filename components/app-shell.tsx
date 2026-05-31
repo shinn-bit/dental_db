@@ -41,7 +41,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Link>
           <nav className="nav" aria-label="主要メニュー">
             {navItems.map((item) => {
-              const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+              const active = item.href === "/"
+                ? pathname === "/"
+                : pathname === item.href || pathname.startsWith(item.href + "/");
               return (
                 <Link key={item.href} href={item.href} className={clsx("nav-item", active && "active")}>
                   {item.label}
