@@ -756,7 +756,7 @@ export function ManualRepositoryPanel() {
 
       {deleteItemId && (
         <ConfirmModal title="アイテムを削除"
-          message="保管庫からこのアイテムを削除します。アップロードファイルの場合はS3からも削除されます。チャット履歴（AI生成の場合）は削除されません。"
+          message="保管庫からこの資料を削除します。この操作は取り消せません。"
           onCancel={() => setDeleteItemId(null)} onConfirm={() => deleteItem(deleteItemId)} />
       )}
       {deleteFolderId && (
