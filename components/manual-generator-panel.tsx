@@ -1453,9 +1453,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
                       }}
                     >
                       {session.type === "slide" ? (
-                        <LayoutTemplate size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                        <LayoutTemplate size={12} style={{ flexShrink: 0, color: "#4a90d9" }} aria-hidden="true" />
                       ) : session.type === "manual" || session.type === "document" ? (
-                        <FileText size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
+                        <FileText size={12} style={{ flexShrink: 0, color: "var(--ink-soft)" }} aria-hidden="true" />
                       ) : (
                         <MessageCircle size={11} style={{ flexShrink: 0, color: "var(--ink-faint)" }} aria-hidden="true" />
                       )}

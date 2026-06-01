@@ -485,14 +485,14 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                       >
                         {session.type === "slide" ? (
                           <LayoutTemplate
-                            size={11}
-                            style={{ flexShrink: 0, color: "var(--ink-faint)" }}
+                            size={12}
+                            style={{ flexShrink: 0, color: "#4a90d9" }}
                             aria-hidden="true"
                           />
                         ) : session.type === "manual" || session.type === "document" ? (
                           <FileText
-                            size={11}
-                            style={{ flexShrink: 0, color: "var(--ink-faint)" }}
+                            size={12}
+                            style={{ flexShrink: 0, color: "var(--ink-soft)" }}
                             aria-hidden="true"
                           />
                         ) : (
