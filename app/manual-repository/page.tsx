@@ -1,9 +1,11 @@
 import { ManualRepositoryPanel } from "@/components/manual-repository-panel";
+import { PageHeading } from "@/components/page-heading";
 
 export default function ManualRepositoryPage() {
   return (
-    <div style={{ flex: 1, display: "flex", alignItems: "stretch", minHeight: 0 }}>
+    <>
+      <PageHeading title="保管庫" />
       <ManualRepositoryPanel />
-    </div>
+    </>
   );
 }
