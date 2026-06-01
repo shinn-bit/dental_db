@@ -56,6 +56,54 @@ function fileExtLabel(fileName: string): string {
 
 // ── Sub-components (outside parent) ──────────────────────────────────────────
 
+function UploadedFilePreview({ s3Key, contentType, fileName }: {
+  s3Key: string; contentType?: string; fileName?: string;
+}) {
+  const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+
+  const isImage = contentType?.startsWith("image/");
+  const isPdf = contentType === "application/pdf" || fileName?.toLowerCase().endsWith(".pdf");
+  const canPreview = isImage || isPdf;
+
+  useEffect(() => {
+    if (!canPreview) return;
+    fetch("/api/manual-repository", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get-download-url", s3Key }),
+    })
+      .then(r => r.json())
+      .then((d: { url?: string }) => { if (d.url) setUrl(d.url); else setFailed(true); })
+      .catch(() => setFailed(true));
+  }, [s3Key, canPreview]);
+
+  if (!canPreview || failed) {
+    return <FileTypeBadge fileName={fileName} contentType={contentType} />;
+  }
+  if (!url) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, color: "var(--ink-muted)" }}>
+        <div className="dot ok" style={{ animation: "pulse 1.2s infinite" }} />
+        <span style={{ fontSize: 10 }}>読み込み中</span>
+      </div>
+    );
+  }
+  if (isImage) {
+    return <img src={url} alt={fileName ?? ""} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />;
+  }
+  // PDF
+  return (
+    <div style={{ width: "100%", height: "100%", overflow: "hidden", position: "relative" }}>
+      <iframe
+        title={fileName ?? "preview"}
+        src={`${url}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+        style={{ width: "178%", height: "178%", border: 0, transform: "scale(0.56)", transformOrigin: "top left", pointerEvents: "none" }}
+        aria-hidden="true"
+      />
+    </div>
+  );
+}
+
 function SlidePreview({ html }: { html: string }) {
   return (
     <div style={{ width: 192, height: 108, overflow: "hidden", flexShrink: 0, background: "#111827" }}>
@@ -104,8 +152,8 @@ function ItemCard({ item, onOpen, onDelete }: {
       <div style={{ height: 88, background: "#f0f4f8", display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden", borderRadius: "8px 8px 0 0" }}>
         {isSlide && item.firstSlideHtml ? (
           <SlidePreview html={item.firstSlideHtml} />
-        ) : isUpload ? (
-          <FileTypeBadge fileName={item.fileName} contentType={item.contentType} />
+        ) : isUpload && item.s3Key ? (
+          <UploadedFilePreview s3Key={item.s3Key} contentType={item.contentType} fileName={item.fileName} />
         ) : (
           <FileText size={36} strokeWidth={1.1} style={{ color: "#7ba3cc" }} />
         )}
