@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Check, ChevronDown, ChevronRight, FileText, Folder, FolderOpen,
-  LayoutTemplate, MoreHorizontal, Plus, Upload, X,
+  Check, ChevronDown, ChevronRight, Edit, FileText, Folder, FolderOpen,
+  LayoutTemplate, MoreHorizontal, Plus, Trash2, Upload, X,
 } from "lucide-react";
 import { Button, FieldLabel } from "@/components/ui";
 import { formatFileSize } from "@/lib/file-assets";
@@ -195,37 +195,89 @@ function ItemCard({ item, onOpen, onDelete }: {
   );
 }
 
+function FolderGlyph({ open }: { open: boolean }) {
+  return (
+    <svg viewBox="0 0 32 24" width={36} height={28} fill="none" stroke="var(--navy-deep)" strokeWidth="1.3" strokeLinejoin="round" aria-hidden="true">
+      <path
+        d={open
+          ? "M2 5a1.5 1.5 0 0 1 1.5-1.5h7l2 2h15a1.5 1.5 0 0 1 1.5 1.5v1l-2.5 12a2 2 0 0 1-2 1.5h-21a1.5 1.5 0 0 1-1.5-1.5z"
+          : "M2 5a1.5 1.5 0 0 1 1.5-1.5h7l2 2h15a1.5 1.5 0 0 1 1.5 1.5v12.5a1.5 1.5 0 0 1-1.5 1.5h-24a1.5 1.5 0 0 1-1.5-1.5z"
+        }
+        fill="var(--navy-tint-soft)"
+      />
+    </svg>
+  );
+}
+
+function SmallIconBtn({ children, onClick, title, danger }: {
+  children: React.ReactNode; onClick: () => void; title: string; danger?: boolean;
+}) {
+  return (
+    <button type="button" onClick={onClick} title={title}
+      style={{ width: 22, height: 22, borderRadius: 4, border: 0, background: "transparent", color: danger ? "#8a3a2d" : "var(--ink-soft)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
+      onMouseEnter={e => { e.currentTarget.style.background = danger ? "#f3e3df" : "var(--navy-tint-soft)"; e.currentTarget.style.color = danger ? "#7a2d22" : "var(--navy-deep)"; }}
+      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = danger ? "#8a3a2d" : "var(--ink-soft)"; }}>
+      {children}
+    </button>
+  );
+}
+
 function FolderCard({ folder, itemCount, isDropTarget, onOpen, onRename, onDelete, onDragOver, onDragLeave, onDrop }: {
   folder: RepoFolder; itemCount: number; isDropTarget: boolean;
-  onOpen: () => void; onRename: () => void; onDelete: () => void;
+  onOpen: () => void; onRename: (name: string) => void; onDelete: () => void;
   onDragOver: (e: React.DragEvent) => void; onDragLeave: (e: React.DragEvent) => void; onDrop: (e: React.DragEvent) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [draft, setDraft] = useState(folder.name);
+  const [hover, setHover] = useState(false);
+
+  function commit() {
+    const v = draft.trim();
+    if (v && v !== folder.name) onRename(v);
+    setRenaming(false);
+  }
+
   return (
     <div
-      style={{ border: `2px solid ${isDropTarget ? "var(--navy)" : "var(--line)"}`, borderRadius: 10, background: isDropTarget ? "var(--navy-tint-soft,#eef2f8)" : "#fff", cursor: "pointer", position: "relative", transition: "border-color .1s" }}
-      onClick={onOpen} onMouseLeave={() => setMenuOpen(false)}
+      onClick={() => !renaming && onOpen()}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}
+      style={{
+        background: isDropTarget ? "var(--navy-tint)" : "var(--panel)",
+        border: `1px solid ${isDropTarget ? "var(--navy)" : hover ? "var(--navy-soft)" : "var(--line)"}`,
+        outline: isDropTarget ? "2px solid var(--navy)" : "none", outlineOffset: -2,
+        borderRadius: 12, padding: "18px 16px 14px",
+        cursor: renaming ? "default" : "pointer", position: "relative",
+        display: "flex", flexDirection: "column", gap: 12, minHeight: 140,
+        transition: "border-color .15s ease, transform .15s ease, box-shadow .15s ease",
+        boxShadow: hover ? "var(--shadow-md)" : "none",
+        transform: hover ? "translateY(-2px)" : "translateY(0)",
+      }}
     >
-      <div style={{ height: 88, background: isDropTarget ? "var(--navy-tint,#c8d9ee)" : "var(--navy-tint-soft,#eef2f8)", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: "8px 8px 0 0", transition: "background .1s" }}>
-        <Folder size={36} strokeWidth={1.2} style={{ color: "var(--navy)" }} />
+      {/* Hover actions */}
+      <div onClick={e => e.stopPropagation()}
+        style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 2, opacity: hover && !renaming ? 1 : 0, transition: "opacity .15s ease", background: "var(--panel)", borderRadius: 6, padding: 2, border: "1px solid var(--line)" }}>
+        <SmallIconBtn title="名前を変更" onClick={() => { setDraft(folder.name); setRenaming(true); }}><Edit size={12} /></SmallIconBtn>
+        <SmallIconBtn title="削除" onClick={onDelete} danger><Trash2 size={12} /></SmallIconBtn>
       </div>
-      <div style={{ padding: "8px 10px" }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginBottom: 3 }}>{folder.name}</div>
-        <div style={{ fontSize: 11, color: "var(--ink-muted)" }}>{itemCount} 件</div>
-      </div>
-      <div style={{ position: "absolute", top: 6, right: 6 }} onClick={e => e.stopPropagation()}>
-        <button type="button" onClick={() => setMenuOpen(v => !v)}
-          style={{ width: 26, height: 26, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "rgba(238,242,248,0.9)", borderRadius: 6, cursor: "pointer", color: "var(--navy)" }}>
-          <MoreHorizontal size={13} />
-        </button>
-        {menuOpen && (
-          <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 50, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.14)", padding: "4px 0" }}>
-            <button type="button" onClick={() => { onOpen(); setMenuOpen(false); }} style={cardMenuItemSt}>開く</button>
-            <button type="button" onClick={() => { onRename(); setMenuOpen(false); }} style={cardMenuItemSt}>名前を変更</button>
-            <button type="button" onClick={() => { onDelete(); setMenuOpen(false); }} style={{ ...cardMenuItemSt, color: "#c0392b" }}>削除</button>
-          </div>
+
+      <FolderGlyph open={hover || isDropTarget} />
+
+      <div className="stack" style={{ gap: 4, flex: 1 }}>
+        {renaming ? (
+          <input autoFocus className="input" value={draft} onChange={e => setDraft(e.target.value)}
+            onBlur={commit} onClick={e => e.stopPropagation()}
+            onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") setRenaming(false); }}
+            style={{ height: 32, padding: "0 8px", fontSize: 15 }} />
+        ) : (
+          <span className="serif" style={{ fontSize: 16, fontWeight: 600, color: "var(--ink)", letterSpacing: "0.04em", lineHeight: 1.3 }}>{folder.name}</span>
         )}
+      </div>
+
+      <div className="between" style={{ paddingTop: 10, borderTop: "1px solid var(--line-soft)", fontSize: 11, color: "var(--ink-muted)", letterSpacing: "0.04em" }}>
+        <span>{itemCount} 件</span>
+        <ChevronRight size={13} style={{ color: "var(--navy-soft)" }} />
       </div>
     </div>
   );
@@ -330,8 +382,6 @@ export function ManualRepositoryPanel() {
   const [folderError, setFolderError] = useState<string | null>(null);
   const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
   const [deleteFolderId, setDeleteFolderId] = useState<string | null>(null);
-  const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
-  const [renamingFolderName, setRenamingFolderName] = useState("");
   const [previewItem, setPreviewItem] = useState<RepoItem | null>(null);
 
   // Upload state
@@ -433,10 +483,10 @@ export function ManualRepositoryPanel() {
   }
 
   async function renameFolder(id: string, name: string) {
-    if (!name.trim()) { setRenamingFolderId(null); setEditingFolderId(null); return; }
+    if (!name.trim()) { setEditingFolderId(null); return; }
     await apiPost({ action: "rename-folder", id, name: name.trim() }).catch(() => {});
     setCatalog(prev => ({ ...prev, folders: prev.folders.map(f => f.id === id ? { ...f, name: name.trim() } : f) }));
-    setRenamingFolderId(null); setEditingFolderId(null);
+    setEditingFolderId(null);
   }
 
   async function deleteFolder(id: string) {
@@ -717,7 +767,7 @@ export function ManualRepositoryPanel() {
                       <FolderCard
                         key={folder.id} folder={folder} itemCount={count} isDropTarget={false}
                         onOpen={() => { selectFolder(folder.id); setExpandedFolders(p => new Set([...p, folder.id])); }}
-                        onRename={() => { setRenamingFolderId(folder.id); setRenamingFolderName(folder.name); }}
+                        onRename={name => renameFolder(folder.id, name)}
                         onDelete={() => setDeleteFolderId(folder.id)}
                         onDragOver={e => e.preventDefault()} onDragLeave={() => {}} onDrop={() => {}}
                       />
@@ -738,21 +788,6 @@ export function ManualRepositoryPanel() {
       </div>
 
       {/* ── Modals ── */}
-      {renamingFolderId && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center" }} onClick={() => setRenamingFolderId(null)}>
-          <div style={{ background: "#fff", borderRadius: 14, padding: 24, width: 300, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }} onClick={e => e.stopPropagation()}>
-            <p style={{ margin: "0 0 12px", fontWeight: 600, fontSize: 15, color: "var(--ink)" }}>フォルダ名を変更</p>
-            <input autoFocus className="input" value={renamingFolderName}
-              onChange={e => setRenamingFolderName(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") renameFolder(renamingFolderId, renamingFolderName); if (e.key === "Escape") setRenamingFolderId(null); }}
-              style={{ marginBottom: 16, height: 36 }} />
-            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-              <button type="button" onClick={() => setRenamingFolderId(null)} style={{ padding: "7px 16px", fontSize: 13, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: "pointer", color: "var(--ink-soft)" }}>キャンセル</button>
-              <button type="button" onClick={() => renameFolder(renamingFolderId, renamingFolderName)} style={{ padding: "7px 16px", fontSize: 13, border: "none", borderRadius: "var(--radius)", background: "var(--navy)", cursor: "pointer", color: "#fff", fontWeight: 600 }}>変更</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {deleteItemId && (
         <ConfirmModal title="アイテムを削除"
