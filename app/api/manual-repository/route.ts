@@ -53,6 +53,14 @@ export async function GET() {
   return NextResponse.json(catalog, { headers: { "Cache-Control": "no-store" } });
 }
 
+type ContentSnapshot = {
+  outputType: "word" | "slide";
+  docMode: "summary" | "procedure" | "free";
+  content: string;
+  slidesHtml: string[];
+  generatedTheme: string;
+};
+
 type ActionBody =
   | { action: "save-item"; item: Omit<RepoItem, "id" | "savedAt"> }
   | { action: "overwrite-item"; id: string; firstSlideHtml?: string }
@@ -60,6 +68,8 @@ type ActionBody =
   | { action: "delete-item"; id: string }
   | { action: "get-upload-url"; fileName: string; contentType: string }
   | { action: "get-download-url"; s3Key: string }
+  | { action: "save-content"; itemId: string; content: ContentSnapshot }
+  | { action: "get-content"; itemId: string }
   | { action: "create-folder"; name: string; parentId: string | null }
   | { action: "rename-folder"; id: string; name: string }
   | { action: "move-folder"; id: string; parentId: string | null }
@@ -88,6 +98,23 @@ export async function POST(req: Request) {
       { expiresIn: 3600 }
     );
     return NextResponse.json({ url });
+  }
+
+  if (body.action === "save-content") {
+    const key = `manual-repository/content/${body.itemId}.json`;
+    const data = { ...body.content, itemId: body.itemId, savedAt: new Date().toISOString() };
+    await putS3Text(BUCKET, key, JSON.stringify(data), "application/json");
+    return NextResponse.json({ ok: true });
+  }
+
+  if (body.action === "get-content") {
+    const key = `manual-repository/content/${body.itemId}.json`;
+    try {
+      const text = await getS3Text(BUCKET, key);
+      return NextResponse.json(parseS3Json<ContentSnapshot & { itemId: string; savedAt: string }>(text));
+    } catch {
+      return NextResponse.json({ error: "not found" }, { status: 404 });
+    }
   }
 
   const catalog = await readCatalog();
@@ -121,10 +148,13 @@ export async function POST(req: Request) {
     }
     case "delete-item": {
       const item = catalog.items.find(i => i.id === body.id);
-      // If uploaded, also remove from S3
       if (item?.source === "uploaded" && item.s3Key) {
         await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: item.s3Key })).catch(() => {});
       }
+      // Delete content snapshot if exists
+      await s3.send(new DeleteObjectCommand({
+        Bucket: BUCKET, Key: `manual-repository/content/${body.id}.json`,
+      })).catch(() => {});
       catalog.items = catalog.items.filter(i => i.id !== body.id);
       await writeCatalog(catalog);
       return NextResponse.json({ ok: true });

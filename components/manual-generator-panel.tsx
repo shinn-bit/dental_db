@@ -854,7 +854,44 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         setMessages(restoredMsgs);
         setNotice("");
       } catch {
-        setNotice("セッションの読み込みに失敗しました");
+        // Session not found — try content snapshot from 保管庫
+        if (initialRepoItemId) {
+          try {
+            const snapRes = await fetch("/api/manual-repository", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ action: "get-content", itemId: initialRepoItemId }),
+            });
+            if (snapRes.ok) {
+              const snap = await snapRes.json() as {
+                outputType?: "word" | "slide";
+                docMode?: "summary" | "procedure" | "free";
+                content?: string; slidesHtml?: string[]; generatedTheme?: string;
+              };
+              setContent(snap.content ?? "");
+              setSlidesHtml(snap.slidesHtml ?? []);
+              setGeneratedOutputType(snap.outputType ?? "word");
+              setOutputType(snap.outputType ?? "word");
+              setGeneratedTheme(snap.generatedTheme ?? "");
+              setDocMode(snap.docMode ?? "summary");
+              // Create new session so further edits are saved fresh
+              sessionIdRef.current = crypto.randomUUID();
+              setCurrentSessionId(null);
+              setMessages([{
+                role: "model",
+                text: "チャット履歴が見つかりませんでしたが、保管庫の保存データからコンテンツを復元しました。続きの編集ができます。",
+                displayText: "✓ 保管庫のスナップショットから復元しました。チャット履歴は失われていますがコンテンツは復元済みです。",
+              }]);
+              setNotice("");
+            } else {
+              setNotice("セッションも保管庫のスナップショットも見つかりませんでした。");
+            }
+          } catch {
+            setNotice("セッションの読み込みに失敗しました");
+          }
+        } else {
+          setNotice("セッションの読み込みに失敗しました");
+        }
       } finally {
         setLoading(false);
       }
@@ -976,6 +1013,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     setSaving(true);
     setSaveError(null);
     try {
+      let targetItemId: string | null = repoItemId;
       if (repoItemId) {
         const res = await fetch("/api/manual-repository", {
           method: "POST",
@@ -1012,7 +1050,22 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         }
         const data = await res.json() as { id: string };
         setRepoItemId(data.id);
+        targetItemId = data.id;
       }
+
+      // Save content snapshot so the document can be restored even if the chat session is deleted
+      if (targetItemId) {
+        await fetch("/api/manual-repository", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "save-content",
+            itemId: targetItemId,
+            content: { outputType: generatedOutputType, docMode, content, slidesHtml, generatedTheme },
+          }),
+        }).catch(() => {}); // snapshot failure is non-fatal
+      }
+
       setShowSaveModal(false);
       setNotice("✓ 保管庫に保存しました");
       window.setTimeout(() => setNotice(n => n === "✓ 保管庫に保存しました" ? "" : n), 2500);
