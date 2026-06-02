@@ -805,7 +805,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
               <textarea
                 ref={textareaRef}
                 className="textarea"
-                rows={3}
+                rows={6}
                 placeholder="質問を入力"
                 value={input}
                 onChange={(e) => {
