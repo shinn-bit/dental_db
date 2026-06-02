@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import time
@@ -61,11 +62,14 @@ def env(name, default=""):
 
 
 AWS_REGION = os.environ.get("APP_AWS_REGION") or os.environ.get("AWS_REGION") or "ap-northeast-1"
-TEXTRACT_REGION = os.environ.get("APP_TEXTRACT_REGION") or os.environ.get("TEXTRACT_REGION") or "ap-northeast-2"
+
+GCP_PROJECT_ID    = os.environ.get("GCP_PROJECT_ID", "")
+GCP_DOCAI_LOCATION = os.environ.get("GCP_DOCAI_LOCATION", "us")
+GCP_PROCESSOR_ID  = os.environ.get("GCP_DOCAI_PROCESSOR_ID", "")
+GCP_SECRET_NAME   = os.environ.get("GCP_CREDENTIALS_SECRET_NAME", "dental/gcp-docai-key")
+DOCAI_BATCH_SIZE  = 15
 
 s3 = boto3.client("s3", region_name=AWS_REGION)
-textract_s3 = boto3.client("s3", region_name=TEXTRACT_REGION)
-textract = boto3.client("textract", region_name=TEXTRACT_REGION)
 bedrock = boto3.client(
     "bedrock-runtime",
     region_name=AWS_REGION,
@@ -146,10 +150,54 @@ def fail_preparation(metadata, message, text_status=None):
     return {"fileId": metadata["id"], "status": "FAILED", "error": message}
 
 
+def get_gcp_credentials():
+    """AWS Secrets Manager から GCP サービスアカウントキーを取得して認証情報を返す。"""
+    from google.oauth2 import service_account
+    sm = boto3.client("secretsmanager", region_name=AWS_REGION)
+    response = sm.get_secret_value(SecretId=GCP_SECRET_NAME)
+    key_data = json.loads(response["SecretString"])
+    return service_account.Credentials.from_service_account_info(
+        key_data,
+        scopes=["https://www.googleapis.com/auth/cloud-platform"],
+    )
+
+
+def run_docai_ocr(pdf_bytes):
+    """Google Document AI でPDFをOCR処理してテキストを返す（15ページバッチ）。"""
+    from google.cloud import documentai
+    from pypdf import PdfReader, PdfWriter
+
+    credentials = get_gcp_credentials()
+    client = documentai.DocumentProcessorServiceClient(credentials=credentials)
+    name = client.processor_path(GCP_PROJECT_ID, GCP_DOCAI_LOCATION, GCP_PROCESSOR_ID)
+
+    reader = PdfReader(io.BytesIO(pdf_bytes))
+    total = len(reader.pages)
+    texts = []
+
+    for start in range(0, total, DOCAI_BATCH_SIZE):
+        end = min(start + DOCAI_BATCH_SIZE, total)
+        writer = PdfWriter()
+        for page in reader.pages[start:end]:
+            writer.add_page(page)
+        buf = io.BytesIO()
+        writer.write(buf)
+
+        raw_doc = documentai.RawDocument(content=buf.getvalue(), mime_type="application/pdf")
+        req = documentai.ProcessRequest(name=name, raw_document=raw_doc)
+        result = client.process_document(request=req)
+        texts.append(result.document.text)
+
+        if end < total:
+            time.sleep(0.5)
+
+    return "\n".join(texts)
+
+
 def start_ocr(event):
+    """Document AI でOCRを同期実行して抽出テキストをS3に保存する。"""
     file_id = event["fileId"]
     bucket = env("S3_BUCKET_NAME")
-    staging_bucket = env("APP_TEXTRACT_BUCKET_NAME")
     metadata = get_metadata(file_id)
     is_prepare = event.get("workflow") == "prepare"
 
@@ -163,32 +211,11 @@ def start_ocr(event):
             save_metadata(metadata)
         return {"fileId": file_id, "status": "TEXT_READY"}
 
-    if metadata.get("textractJobId") and metadata.get("textExtractionStatus") == "processing":
-        return {"fileId": file_id, "status": "OCR_STARTED", "textractJobId": metadata["textractJobId"]}
-
-    staging_key = textract_input_key(file_id)
-    source = s3.get_object(Bucket=bucket, Key=metadata["s3Key"])
-    textract_s3.put_object(
-        Bucket=staging_bucket,
-        Key=staging_key,
-        Body=source["Body"].read(),
-        ContentType=metadata.get("contentType") or "application/pdf",
-    )
-
-    response = textract.start_document_text_detection(
-        DocumentLocation={"S3Object": {"Bucket": staging_bucket, "Name": staging_key}}
-    )
-    job_id = response.get("JobId")
-    if not job_id:
-        if is_prepare:
-            return fail_preparation(metadata, "Textract OCRジョブを開始できませんでした。", "failed")
-        return fail_metadata(metadata, "Textract OCRジョブを開始できませんでした。", "failed")
-
     next_values = {
         "textExtractionStatus": "processing",
-        "textExtractionSource": "ocr",
+        "textExtractionSource": "docai",
         "extractedTextLength": 0,
-        "textractJobId": job_id,
+        "textractJobId": "",
     }
     if is_prepare:
         next_values.update({"preparationStatus": "processing", "preparationError": ""})
@@ -197,71 +224,32 @@ def start_ocr(event):
     metadata.update(next_values)
     save_metadata(metadata)
 
-    return {"fileId": file_id, "status": "OCR_STARTED", "textractJobId": job_id}
+    try:
+        source = s3.get_object(Bucket=bucket, Key=metadata["s3Key"])
+        pdf_bytes = source["Body"].read()
+        text = run_docai_ocr(pdf_bytes)
+    except Exception as exc:
+        msg = f"Document AI OCRに失敗しました: {exc}"
+        if is_prepare:
+            return fail_preparation(metadata, msg, "failed")
+        return fail_metadata(metadata, msg, "failed")
+
+    key = ocr_text_key(file_id)
+    put_text(bucket, key, text, "text/plain; charset=utf-8")
+    metadata.update({
+        "textExtractionStatus": "completed",
+        "textExtractionSource": "docai",
+        "extractedTextKey": key,
+        "extractedTextLength": len(text),
+        "textractJobId": "",
+    })
+    save_metadata(metadata)
+    return {"fileId": file_id, "status": "TEXT_READY"}
 
 
 def check_ocr(event):
-    file_id = event["fileId"]
-    bucket = env("S3_BUCKET_NAME")
-    staging_bucket = env("APP_TEXTRACT_BUCKET_NAME")
-    metadata = get_metadata(file_id)
-    is_prepare = event.get("workflow") == "prepare"
-
-    if metadata.get("extractedTextKey"):
-        return {"fileId": file_id, "ocrStatus": "SUCCEEDED"}
-
-    job_id = metadata.get("textractJobId")
-    if not job_id:
-        if is_prepare:
-            return fail_preparation(metadata, "Textract OCRジョブIDが見つかりません。", "failed")
-        return fail_metadata(metadata, "Textract OCRジョブIDが見つかりません。", "failed")
-
-    lines = []
-    next_token = None
-    while True:
-        request = {"JobId": job_id}
-        if next_token:
-            request["NextToken"] = next_token
-        response = textract.get_document_text_detection(**request)
-        job_status = response.get("JobStatus")
-
-        if job_status == "IN_PROGRESS":
-            return {"fileId": file_id, "ocrStatus": "IN_PROGRESS"}
-
-        if job_status in ("FAILED", "PARTIAL_SUCCESS"):
-            message = response.get("StatusMessage") or f"Textract OCRジョブが{job_status}で終了しました。"
-            if is_prepare:
-                return fail_preparation(metadata, message, "failed")
-            return fail_metadata(metadata, message, "failed")
-
-        for block in response.get("Blocks", []):
-            if block.get("BlockType") == "LINE" and block.get("Text"):
-                lines.append(block["Text"])
-
-        next_token = response.get("NextToken")
-        if not next_token:
-            break
-
-    text = "\n".join(lines).strip()
-    key = ocr_text_key(file_id)
-    put_text(bucket, key, text, "text/plain; charset=utf-8")
-    metadata.update(
-        {
-            "textExtractionStatus": "completed",
-            "textExtractionSource": "ocr",
-            "extractedTextKey": key,
-            "extractedTextLength": len(text),
-            "textractJobId": "",
-        }
-    )
-    save_metadata(metadata)
-
-    try:
-        textract_s3.delete_object(Bucket=staging_bucket, Key=textract_input_key(file_id))
-    except ClientError:
-        pass
-
-    return {"fileId": file_id, "ocrStatus": "SUCCEEDED"}
+    """Document AI はstart_ocr内で同期完了するためパススルー。"""
+    return {"fileId": event["fileId"], "ocrStatus": "SUCCEEDED"}
 
 
 def create_knowledge_base_document(summary):
