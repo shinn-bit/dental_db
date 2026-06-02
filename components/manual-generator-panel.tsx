@@ -1779,7 +1779,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
               <span>追加</span>
             </button>
             <input type="file" accept="image/*,.pdf,.docx" multiple hidden ref={fileInputRef} onChange={handleFileAttach} />
-            <textarea className="textarea" rows={3} placeholder={docMode === "procedure" ? "手順書の内容を入力…" : docMode === "free" ? "作成内容を自由に入力…" : "病気・処置名などを入力…"} value={input}
+            <textarea className="textarea" rows={5} placeholder={docMode === "procedure" ? "手順書の内容を入力…" : docMode === "free" ? "作成内容を自由に入力…" : "病気・処置名などを入力…"} value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendMessage(); } }}
               disabled={loading} style={{ resize: "none" }}

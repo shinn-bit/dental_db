@@ -419,7 +419,7 @@ export function InsuranceChatPanel({
                 <Paperclip size={16} aria-hidden="true" />
                 <span style={{ fontSize: 10, letterSpacing: "0.12em", fontWeight: 500 }}>添付</span>
               </Button>
-              <textarea ref={textareaRef} className="textarea" rows={1} placeholder="治療内容や請求内容を入力、または保険ルールを質問"
+              <textarea ref={textareaRef} className="textarea" rows={3} placeholder="治療内容や請求内容を入力、または保険ルールを質問"
                 value={input}
                 onChange={e => { setInput(e.target.value); adjustTextareaHeight(); }}
                 onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendMessage(); } }}
