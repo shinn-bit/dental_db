@@ -25,10 +25,22 @@ from datetime import datetime, timezone
 import boto3
 from botocore.config import Config
 
+# pymupdf 同梱ライブラリを ctypes で先にロードしておく（LD_LIBRARY_PATH より確実）
+import ctypes as _ctypes
+_pymupdf_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pymupdf")
+if os.path.isdir(_pymupdf_dir):
+    for _lib in ["libmupdf.so.24.2", "libmupdfcpp.so.24.2", "_mupdf.so"]:
+        _lib_path = os.path.join(_pymupdf_dir, _lib)
+        if os.path.exists(_lib_path):
+            try:
+                _ctypes.CDLL(_lib_path)
+            except OSError:
+                pass
+
 try:
     import fitz  # PyMuPDF
     FITZ_AVAILABLE = True
-except ImportError:
+except (ImportError, OSError):
     FITZ_AVAILABLE = False
 
 # ── 設定 ──────────────────────────────────────────────────────────────────────
@@ -323,7 +335,42 @@ def append_images_to_kb(file_id: str, images: list[dict]):
 
 # ── エントリーポイント ────────────────────────────────────────────────────────
 
+def handler_thumbnail_only(file_id: str) -> dict:
+    """PDFのページ1サムネイルのみを生成する。画像抽出はスキップ。"""
+    try:
+        metadata = get_metadata(file_id)
+    except Exception as e:
+        return {"status": "FAILED", "fileId": file_id, "error": str(e)}
+
+    if metadata.get("thumbnailKey"):
+        return {"status": "SKIPPED", "fileId": file_id, "reason": "already exists"}
+
+    if "pdf" not in metadata.get("contentType", "").lower():
+        return {"status": "SKIPPED", "fileId": file_id, "reason": "not a PDF"}
+
+    pdf_path = None
+    try:
+        pdf_path = download_pdf(metadata["s3Key"])
+        key = generate_thumbnail(pdf_path, file_id)
+        if key:
+            metadata["thumbnailKey"] = key
+            save_metadata(metadata)
+            return {"status": "COMPLETED", "fileId": file_id, "thumbnailKey": key}
+        return {"status": "FAILED", "fileId": file_id, "error": "thumbnail generation failed"}
+    except Exception as e:
+        return {"status": "FAILED", "fileId": file_id, "error": str(e)}
+    finally:
+        if pdf_path:
+            try:
+                os.unlink(pdf_path)
+            except Exception:
+                pass
+
+
 def handler(event, _context):
+    if event.get("action") == "generate_thumbnail_only":
+        return handler_thumbnail_only(event.get("fileId", ""))
+
     file_id = event.get("fileId")
     if not file_id:
         return {"status": "FAILED", "error": "fileId is required"}
