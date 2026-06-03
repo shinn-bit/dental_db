@@ -39,6 +39,8 @@ S3_METADATA_PREFIX    = os.environ.get("S3_METADATA_PREFIX", "metadata/")
 BEDROCK_MODEL_ARN     = os.environ.get("BEDROCK_MODEL_ARN", "")
 BEDROCK_VISION_MODEL_ARN = os.environ.get("BEDROCK_VISION_MODEL_ARN") or BEDROCK_MODEL_ARN
 
+THUMBNAIL_WIDTH       = 400
+
 MIN_CAPTION_CHARS     = 15
 SKIP_DESCRIPTION_WORDS = [
     "表紙", "目次", "はじめに", "前書き", "まえがき", "序文",
@@ -157,6 +159,24 @@ def describe_with_vision(img_bytes: bytes, media_type: str = "image/jpeg") -> st
     ).strip()
 
 # ── 画像抽出（バッチ対応） ────────────────────────────────────────────────────
+
+def generate_thumbnail(pdf_path: str, file_id: str) -> str | None:
+    """PDFのページ1をJPEGサムネイルとしてS3に保存する。キーを返す。失敗時はNone。"""
+    try:
+        doc = fitz.open(pdf_path)
+        page = doc[0]
+        zoom = THUMBNAIL_WIDTH / page.rect.width
+        pix = page.get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
+        img_bytes = pix.tobytes("jpeg", jpg_quality=85)
+        doc.close()
+        key = f"thumbnails/{file_id}.jpeg"
+        s3.put_object(Bucket=S3_BUCKET, Key=key, Body=img_bytes, ContentType="image/jpeg")
+        print(f"[thumbnail] 生成完了: {key} ({len(img_bytes) // 1024}KB)")
+        return key
+    except Exception as e:
+        print(f"[thumbnail] 生成失敗: {e}")
+        return None
+
 
 def extract_images(
     pdf_path: str,
@@ -362,6 +382,13 @@ def handler(event, _context):
         metadata["imageProcessingError"] = f"PDF解析失敗: {e}"
         save_metadata(metadata)
         return {"status": "FAILED", "fileId": file_id, "error": str(e)}
+
+    # サムネイル生成（最初のバッチのみ・未生成の場合）
+    if start_page == 0 and not metadata.get("thumbnailKey"):
+        thumb_key = generate_thumbnail(pdf_path, file_id)
+        if thumb_key:
+            metadata["thumbnailKey"] = thumb_key
+            save_metadata(metadata)
 
     # 画像抽出（このバッチ分のみ）
     try:

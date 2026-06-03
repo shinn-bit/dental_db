@@ -1,4 +1,5 @@
 ﻿import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { StartExecutionCommand } from "@aws-sdk/client-sfn";
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-error";
@@ -66,7 +67,23 @@ export async function GET() {
 
     metadata.sort((a, b) => Date.parse(b.uploadedAt) - Date.parse(a.uploadedAt));
 
-    return NextResponse.json({ files: metadata });
+    const files = await Promise.all(
+      metadata.map(async (m) => {
+        if (!m.thumbnailKey) return { ...m, thumbnailUrl: null };
+        try {
+          const thumbnailUrl = await getSignedUrl(
+            s3,
+            new GetObjectCommand({ Bucket: bucket, Key: m.thumbnailKey }),
+            { expiresIn: 3600 }
+          );
+          return { ...m, thumbnailUrl };
+        } catch {
+          return { ...m, thumbnailUrl: null };
+        }
+      })
+    );
+
+    return NextResponse.json({ files });
   } catch (error) {
     return apiErrorResponse(error, "S3一覧を読み込めませんでした");
   }

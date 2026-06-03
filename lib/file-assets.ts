@@ -36,6 +36,7 @@ export type StoredFileMetadata = {
   imageProcessingStatus?: "processing" | "completed" | "failed";
   imageProcessingError?: string;
   imageProcessedAt?: string;
+  thumbnailKey?: string;
   images?: Array<{
     index: number;
     page: number;

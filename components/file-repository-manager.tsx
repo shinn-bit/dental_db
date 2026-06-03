@@ -24,6 +24,7 @@ type RepositoryFile = {
   summaryUpdatedAt: string;
   preparationStatus: StoredFileMetadata["preparationStatus"];
   ragSyncStatus: StoredFileMetadata["ragSyncStatus"];
+  thumbnailUrl: string | null;
   textExtractionStatus: StoredFileMetadata["textExtractionStatus"];
   imageCount: number;
   imageProcessingStatus: StoredFileMetadata["imageProcessingStatus"];
@@ -215,7 +216,7 @@ export function FileRepositoryManager() {
     try {
       const res = await fetch("/api/files", { cache: "no-store" });
       if (!res.ok) throw new Error("S3一覧を読み込めませんでした。");
-      const data = (await res.json()) as { files: StoredFileMetadata[] };
+      const data = (await res.json()) as { files: Array<StoredFileMetadata & { thumbnailUrl?: string | null }> };
       setFiles(data.files.map(toRepositoryFile));
     } catch (error) {
       if (opts.updateNotice !== false) setNotice(error instanceof Error ? error.message : "S3一覧を読み込めませんでした。");
@@ -1111,39 +1112,16 @@ function InlineEdit({ value, placeholder, onSave, className, isPlaceholder }: {
 
 // ── FilePreview ──────────────────────────────────────────────────
 function FilePreview({ file }: { file: RepositoryFile }) {
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [failed, setFailed] = useState(false);
-  const isPdf = file.contentType.includes("pdf") || file.name.toLowerCase().endsWith(".pdf");
-  const isImage = file.contentType.startsWith("image/");
-  const canPreview = isPdf || isImage;
-
-  useEffect(() => {
-    let ignore = false;
-    async function load() {
-      if (!canPreview) return;
-      try {
-        const res = await fetch(`/api/files/${file.id}/preview-url`, { cache: "no-store" });
-        if (!res.ok) throw new Error("");
-        const data = (await res.json()) as { url: string };
-        if (!ignore) { setPreviewUrl(data.url); setFailed(false); }
-      } catch { if (!ignore) setFailed(true); }
-    }
-    load();
-    return () => { ignore = true; };
-  }, [canPreview, file.id]);
-
-  if (!canPreview || failed) {
-    return <FileSpine name={file.name} ext={file.thumbnailLabel || file.name.split(".").pop() || "FILE"} version={file.version} />;
-  }
-  return (
-    <div style={{ width: 92, height: 128, flexShrink: 0, overflow: "hidden", border: "1px solid var(--line)", borderRadius: 8, background: "#fff", boxShadow: "var(--shadow-sm)" }}>
-      <div style={{ position: "relative", width: "100%", height: "100%", overflow: "hidden", background: "var(--panel-deep)" }}>
-        {previewUrl && isImage ? <img src={previewUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : null}
-        {previewUrl && isPdf ? <iframe title={`${file.name} preview`} src={`${previewUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=FitH`} style={{ width: "178%", height: "178%", border: 0, transform: "scale(0.64)", transformOrigin: "top left", pointerEvents: "none" }} aria-hidden="true" /> : null}
-        {!previewUrl ? <div className="stack" style={{ height: "100%", alignItems: "center", justifyContent: "center", gap: 6, color: "var(--ink-muted)" }}><span className="dot ok" style={{ animation: "pulse 1.2s infinite" }} /><span className="tiny soft">読み込み中</span></div> : null}
+  // サムネイルJPEGがあれば即表示（APIコールなし）
+  if (file.thumbnailUrl) {
+    return (
+      <div style={{ width: 92, height: 128, flexShrink: 0, overflow: "hidden", border: "1px solid var(--line)", borderRadius: 8, background: "#fff", boxShadow: "var(--shadow-sm)" }}>
+        <img src={file.thumbnailUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
       </div>
-    </div>
-  );
+    );
+  }
+  // サムネイル未生成はラベル表示にフォールバック
+  return <FileSpine name={file.name} ext={file.thumbnailLabel || file.name.split(".").pop() || "FILE"} version={file.version} />;
 }
 
 // ── Image Gallery Overlay ────────────────────────────────────────
@@ -1434,7 +1412,7 @@ function MetaRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function toRepositoryFile(m: StoredFileMetadata): RepositoryFile {
+function toRepositoryFile(m: StoredFileMetadata & { thumbnailUrl?: string | null }): RepositoryFile {
   return {
     id: m.id, name: m.fileName, contentType: m.contentType,
     date: formatDisplayDate(m.uploadedAt),
@@ -1446,6 +1424,7 @@ function toRepositoryFile(m: StoredFileMetadata): RepositoryFile {
     summaryUpdatedAt: m.summaryUpdatedAt || "",
     preparationStatus: m.preparationStatus || "not_started",
     ragSyncStatus: m.ragSyncStatus || "not_started",
+    thumbnailUrl: m.thumbnailUrl ?? null,
     textExtractionStatus: m.textExtractionStatus || "not_started",
     imageCount: m.images?.length ?? 0,
     imageProcessingStatus: m.imageProcessingStatus,
