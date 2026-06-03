@@ -141,6 +141,7 @@ export function normalizeFileMetadata(input: FileMetadataInput): StoredFileMetad
     imageProcessingError: input.imageProcessingError || "",
     imageProcessedAt: input.imageProcessedAt,
     images: input.images,
+    thumbnailKey: input.thumbnailKey,
   };
 }
 
