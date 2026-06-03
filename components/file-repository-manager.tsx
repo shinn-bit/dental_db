@@ -23,6 +23,7 @@ type RepositoryFile = {
   summaryMode: StoredFileMetadata["summaryMode"];
   summaryUpdatedAt: string;
   preparationStatus: StoredFileMetadata["preparationStatus"];
+  ragSyncStatus: StoredFileMetadata["ragSyncStatus"];
   textExtractionStatus: StoredFileMetadata["textExtractionStatus"];
   imageCount: number;
   imageProcessingStatus: StoredFileMetadata["imageProcessingStatus"];
@@ -230,11 +231,35 @@ export function FileRepositoryManager() {
     return () => { ignore = true; };
   }, []);
 
+  const prevPreparingCountRef = useRef(-1);
+
+  async function triggerKbSync() {
+    try {
+      await fetch("/api/kb-sync", { method: "POST" });
+      await loadFiles({ updateNotice: false });
+    } catch (e) {
+      console.error("[kb-sync]", e);
+    }
+  }
+
   useEffect(() => {
-    const hasPending = files.some(
-      f => f.preparationStatus === "processing" || f.preparationStatus === "syncing" ||
-           f.summaryStatus === "processing" || f.imageProcessingStatus === "processing"
+    const preparingCount = files.filter(
+      f => f.preparationStatus === "processing"
+    ).length;
+
+    const needsSync = files.some(
+      f => f.preparationStatus === "completed" && f.ragSyncStatus === "not_started"
     );
+
+    if (prevPreparingCountRef.current > 0 && preparingCount === 0 && needsSync) {
+      triggerKbSync();
+    }
+    prevPreparingCountRef.current = preparingCount;
+
+    const hasPending = preparingCount > 0 ||
+      files.some(f => f.ragSyncStatus === "syncing" ||
+                      f.summaryStatus === "processing" ||
+                      f.imageProcessingStatus === "processing");
     if (!hasPending) return;
     const timer = window.setInterval(() => loadFiles({ updateNotice: false }), 8000);
     return () => window.clearInterval(timer);
@@ -657,9 +682,26 @@ export function FileRepositoryManager() {
                 </span>
               ))}
             </nav>
-            <div style={{ position: "relative", flexShrink: 0 }}>
-              <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-muted)", pointerEvents: "none" }} aria-hidden="true" />
-              <input className="input" placeholder="資料庫全体から探す" value={libQuery} onChange={e => setLibQuery(e.target.value)} style={{ paddingLeft: 32, height: 36, width: 200 }} />
+            <div className="row" style={{ gap: 8, flexShrink: 0 }}>
+              {(() => {
+                const isSyncing = files.some(f => f.ragSyncStatus === "syncing");
+                const hasUnsynced = files.some(f => f.preparationStatus === "completed" && f.ragSyncStatus === "not_started");
+                return (
+                  <Button variant="secondary" size="sm"
+                    disabled={isSyncing}
+                    onClick={triggerKbSync}
+                    title="準備完了ファイルをBedrockナレッジベースに一括同期します"
+                    style={{ gap: 5, opacity: (!isSyncing && !hasUnsynced) ? 0.5 : 1 }}>
+                    {isSyncing
+                      ? <><RefreshCw size={12} style={{ animation: "spin 1s linear infinite" }} aria-hidden="true" />AI同期中</>
+                      : <><RefreshCw size={12} aria-hidden="true" />AI同期</>}
+                  </Button>
+                );
+              })()}
+              <div style={{ position: "relative" }}>
+                <Search size={14} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--ink-muted)", pointerEvents: "none" }} aria-hidden="true" />
+                <input className="input" placeholder="資料庫全体から探す" value={libQuery} onChange={e => setLibQuery(e.target.value)} style={{ paddingLeft: 32, height: 36, width: 200 }} />
+              </div>
             </div>
           </div>
 
@@ -933,6 +975,7 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
   const canSummary = file.preparationStatus === "completed";
   const summaryInProgress = file.summaryStatus === "processing" || processing;
   const needsOcr = file.textExtractionStatus === "ocr_required";
+  const { ragSyncStatus, preparationStatus } = file;
 
   return (
     <article style={{ background: "#fff", border: "1px solid var(--line)", borderRadius: 12, padding: 16, display: "flex", flexDirection: "column", gap: 12, position: "relative", transition: "border-color .15s ease, transform .15s ease, box-shadow .15s ease" }}
@@ -952,10 +995,14 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
         </div>
       ) : null}
       <div className="row" style={{ gap: 4, fontSize: 11, color: "var(--ink-muted)", flexWrap: "wrap" }}>
-        {file.preparationStatus === "completed" ? (
+        {ragSyncStatus === "completed" ? (
           <span className="row" style={{ gap: 5 }}><span className="dot ok" />AI参照可</span>
-        ) : file.preparationStatus === "processing" || file.preparationStatus === "syncing" ? (
+        ) : ragSyncStatus === "syncing" ? (
+          <span className="row" style={{ gap: 5 }}><RefreshCw size={11} style={{ animation: "spin 1s linear infinite" }} aria-hidden="true" />AI同期中</span>
+        ) : preparationStatus === "processing" ? (
           <span className="row" style={{ gap: 5 }}><RefreshCw size={11} aria-hidden="true" />準備中</span>
+        ) : preparationStatus === "completed" ? (
+          <span className="row" style={{ gap: 4 }}>AI同期待ち</span>
         ) : needsOcr ? (
           <span className="row" style={{ gap: 4, color: "var(--warn)", background: "var(--warn-tint)", padding: "3px 8px", borderRadius: 4, fontWeight: 500 }}>文字の読み取りが必要</span>
         ) : (
@@ -1214,7 +1261,7 @@ function DetailOverlay({ file, draft, saving, folders, onDraft, onSave, onOpenSo
             <textarea className="textarea" value={draft.memo} placeholder="資料の補足、運用メモなど" style={{ minHeight: 110 }} onChange={e => onDraft(cur => cur ? { ...cur, memo: e.target.value } : cur)} />
           </div>
           <div style={{ marginTop: 18, display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 10 }}>
-            <MetaRow label="AI参照" value={file.preparationStatus === "completed" ? "可" : file.preparationStatus || "未開始"} />
+            <MetaRow label="AI参照" value={file.ragSyncStatus === "completed" ? "可" : file.ragSyncStatus === "syncing" ? "同期中" : file.preparationStatus === "completed" ? "同期待ち" : file.preparationStatus || "未開始"} />
             <MetaRow label="要約" value={file.summaryStatus === "completed" ? "作成済み" : file.summaryStatus || "未作成"} />
             <MetaRow label="OCR" value={file.textExtractionStatus || "未開始"} />
             {file.contentType.includes("pdf") ? (
@@ -1398,6 +1445,7 @@ function toRepositoryFile(m: StoredFileMetadata): RepositoryFile {
     summaryMode: m.summaryMode || "legacy",
     summaryUpdatedAt: m.summaryUpdatedAt || "",
     preparationStatus: m.preparationStatus || "not_started",
+    ragSyncStatus: m.ragSyncStatus || "not_started",
     textExtractionStatus: m.textExtractionStatus || "not_started",
     imageCount: m.images?.length ?? 0,
     imageProcessingStatus: m.imageProcessingStatus,

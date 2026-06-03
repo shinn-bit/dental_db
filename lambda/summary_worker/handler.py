@@ -296,7 +296,7 @@ def create_kb_document(event):
     metadata.update(
         {
             "knowledgeBaseKey": kb_s3_key,
-            "preparationStatus": "syncing",
+            "preparationStatus": "completed",
             "preparationError": "",
             "ragSyncStatus": "not_started",
             "ragSyncJobId": "",
@@ -363,6 +363,128 @@ def check_kb_sync(event):
 
     message = job.get("failureReasons") or f"Bedrock KB同期ジョブが{status or 'UNKNOWN'}で終了しました。"
     return fail_preparation(metadata, str(message))
+
+
+def run_batch_kb_sync(event):
+    """準備完了済みで未同期のファイルをまとめてKB同期する。UIまたは自動トリガーから呼ばれる。"""
+    bucket = env("S3_BUCKET_NAME")
+    metadata_prefix = os.environ.get("S3_METADATA_PREFIX", "metadata/")
+
+    # 同期待ちファイルを収集
+    pending_ids = []
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=metadata_prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not key.endswith(".json"):
+                continue
+            file_id = key[len(metadata_prefix):][:-5]  # "metadata/" と ".json" を除去
+            if not file_id or "_" not in file_id:
+                continue
+            try:
+                raw = s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8-sig")
+                meta = json.loads(raw)
+                if meta.get("preparationStatus") == "completed" and meta.get("ragSyncStatus") in ("not_started", "failed", ""):
+                    pending_ids.append(file_id)
+            except Exception:
+                continue
+
+    if not pending_ids:
+        return {"status": "NOTHING_TO_SYNC"}
+
+    print(f"[batch_kb_sync] 同期対象: {len(pending_ids)}件")
+
+    # KB同期ジョブを開始（実行中なら既存ジョブを使う）
+    job_id = None
+    try:
+        resp = bedrock_agent.start_ingestion_job(
+            knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
+            dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
+            description=f"Batch KB sync ({len(pending_ids)} files)",
+        )
+        job_id = resp["ingestionJob"]["ingestionJobId"]
+        print(f"[batch_kb_sync] 新規ジョブ開始: {job_id}")
+    except Exception as e:
+        if "ConflictException" not in str(e):
+            print(f"[batch_kb_sync] ジョブ開始失敗: {e}")
+            return {"status": "FAILED", "error": str(e)}
+        # 実行中ジョブを取得して相乗り
+        try:
+            jobs = bedrock_agent.list_ingestion_jobs(
+                knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
+                dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
+                filters=[{"attribute": "STATUS", "operator": "EQ", "values": ["STARTING", "IN_PROGRESS"]}],
+            )
+            running = jobs.get("ingestionJobSummaries", [])
+            if running:
+                job_id = running[0]["ingestionJobId"]
+                print(f"[batch_kb_sync] 既存ジョブに合流: {job_id}")
+            else:
+                # 極まれに完了タイミングが重なった場合は再試行
+                resp = bedrock_agent.start_ingestion_job(
+                    knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
+                    dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
+                    description=f"Batch KB sync retry ({len(pending_ids)} files)",
+                )
+                job_id = resp["ingestionJob"]["ingestionJobId"]
+                print(f"[batch_kb_sync] 再試行ジョブ開始: {job_id}")
+        except Exception as e2:
+            print(f"[batch_kb_sync] ジョブ取得/再試行失敗: {e2}")
+            return {"status": "FAILED", "error": str(e2)}
+
+    # 対象ファイルを "syncing" にマーク
+    for file_id in pending_ids:
+        try:
+            meta = get_metadata(file_id)
+            if meta.get("ragSyncStatus") in ("not_started", "failed", ""):
+                meta.update({"ragSyncStatus": "syncing", "ragSyncJobId": job_id})
+                save_metadata(meta)
+        except Exception:
+            pass
+
+    # 完了までポーリング（15秒間隔、最大50回 = 最大12.5分）
+    for _ in range(50):
+        time.sleep(15)
+        try:
+            job_resp = bedrock_agent.get_ingestion_job(
+                knowledgeBaseId=env("BEDROCK_KNOWLEDGE_BASE_ID"),
+                dataSourceId=env("BEDROCK_DATA_SOURCE_ID"),
+                ingestionJobId=job_id,
+            )
+            status = job_resp.get("ingestionJob", {}).get("status")
+        except Exception as e:
+            print(f"[batch_kb_sync] ジョブ確認エラー: {e}")
+            continue
+
+        if status == "COMPLETE":
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            completed = 0
+            for file_id in pending_ids:
+                try:
+                    meta = get_metadata(file_id)
+                    if meta.get("ragSyncJobId") == job_id and meta.get("ragSyncStatus") == "syncing":
+                        meta.update({"ragSyncStatus": "completed", "ragSyncedAt": now})
+                        save_metadata(meta)
+                        completed += 1
+                except Exception:
+                    pass
+            print(f"[batch_kb_sync] 完了: {completed}件更新")
+            return {"status": "COMPLETED", "jobId": job_id, "count": completed}
+
+        if status in ("FAILED", "STOPPED"):
+            for file_id in pending_ids:
+                try:
+                    meta = get_metadata(file_id)
+                    if meta.get("ragSyncJobId") == job_id and meta.get("ragSyncStatus") == "syncing":
+                        meta.update({"ragSyncStatus": "failed"})
+                        save_metadata(meta)
+                except Exception:
+                    pass
+            print(f"[batch_kb_sync] ジョブ失敗: {status}")
+            return {"status": "FAILED", "jobId": job_id}
+
+    print("[batch_kb_sync] タイムアウト")
+    return {"status": "TIMEOUT", "jobId": job_id}
 
 
 def invoke_bedrock(prompt, max_tokens=4096):
@@ -528,4 +650,6 @@ def handler(event, _context):
         return start_kb_sync(event)
     if action == "check_kb_sync":
         return check_kb_sync(event)
+    if action == "run_batch_kb_sync":
+        return run_batch_kb_sync(event)
     raise ValueError(f"Unknown action: {action}")
