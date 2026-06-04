@@ -943,6 +943,75 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   );
 }
 
+function ImageStrip({ images }: { images: ChatImage[] }) {
+  const [lightbox, setLightbox] = useState<number | null>(null);
+
+  return (
+    <>
+      <div style={{ marginTop: 14 }}>
+        <div className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.08em", marginBottom: 8 }}>
+          関連資料の画像 {images.length}枚
+        </div>
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6 }}>
+          {images.map((img, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setLightbox(i)}
+              style={{ flexShrink: 0, width: 120, height: 90, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "#f8f9fa", cursor: "zoom-in", padding: 0, position: "relative" }}
+              title={`${img.documentName.replace(/\.[^.]+$/, "")} p.${img.page}`}
+            >
+              <img src={img.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.45)", color: "#fff", fontSize: 9, padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: "0.04em" }}>
+                p.{img.page}
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {lightbox !== null ? (
+        <div
+          onClick={() => setLightbox(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 12, overflow: "hidden", maxWidth: 780, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ position: "relative", background: "#f0f0f0", display: "flex", alignItems: "center", justifyContent: "center", maxHeight: "55vh" }}>
+              <img
+                src={images[lightbox].url}
+                alt=""
+                style={{ maxWidth: "100%", maxHeight: "55vh", objectFit: "contain", display: "block" }}
+              />
+              <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
+                {lightbox > 0 && (
+                  <button type="button" onClick={() => setLightbox(lightbox - 1)}
+                    style={{ background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 16 }}>‹</button>
+                )}
+                {lightbox < images.length - 1 && (
+                  <button type="button" onClick={() => setLightbox(lightbox + 1)}
+                    style={{ background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 16 }}>›</button>
+                )}
+                <button type="button" onClick={() => setLightbox(null)}
+                  style={{ background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 14 }}>✕</button>
+              </div>
+            </div>
+            <div style={{ padding: "14px 18px", overflowY: "auto" }}>
+              <div style={{ fontSize: 11, color: "var(--ink-muted)", marginBottom: 6, letterSpacing: "0.06em" }}>
+                {images[lightbox].documentName.replace(/\.[^.]+$/, "")} — {images[lightbox].page}ページ
+                <span style={{ marginLeft: 8, color: "var(--ink-faint)" }}>{lightbox + 1} / {images.length}</span>
+              </div>
+              <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.7 }}>{images[lightbox].description}</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function UserMessage({ text }: { text: string }) {
   return (
     <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -1023,26 +1092,7 @@ function AssistantMessage({
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
           </div>
           {images && images.length > 0 ? (
-            <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-              <div className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.08em" }}>
-                関連資料の画像
-              </div>
-              {images.map((img, i) => (
-                <div key={i} style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden" }}>
-                  <img
-                    src={img.url}
-                    alt={img.description}
-                    style={{ width: "100%", maxHeight: 320, objectFit: "contain", display: "block", background: "#f8f9fa" }}
-                  />
-                  <div style={{ padding: "8px 12px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)" }}>
-                    <div style={{ fontSize: 11, color: "var(--ink-muted)", marginBottom: 3, letterSpacing: "0.06em" }}>
-                      {img.documentName.replace(/\.[^.]+$/, "")} — {img.page}ページ
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--ink-soft)", lineHeight: 1.6 }}>{img.description}</div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <ImageStrip images={images} />
           ) : null}
         </div>
         <div
