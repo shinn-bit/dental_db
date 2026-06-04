@@ -959,6 +959,19 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
     el.scrollTop  = (el.scrollHeight - el.clientHeight) / 2;
   }, [zoom]);
 
+  // passive:false でホイールイベントを登録しブラウザのページズームを防止する
+  // React の onWheel は passive なので preventDefault() が効かないため直接登録する
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || lightbox === null) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      setZoom(z => Math.max(0.5, Math.min(4, +(z * (e.deltaY > 0 ? 0.9 : 1.1)).toFixed(2))));
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [lightbox]);
+
   function openAt(i: number) { setLightbox(i); setZoom(1); }
   function close() { setLightbox(null); setZoom(1); }
   function prev() { setLightbox(l => (l ?? 1) - 1); setZoom(1); }
@@ -966,11 +979,6 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
   function zoomIn()    { setZoom(z => Math.min(4, +(z + 0.25).toFixed(2))); }
   function zoomOut()   { setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2))); }
   function zoomReset() { setZoom(1); }
-
-  function handleWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    setZoom(z => Math.max(0.5, Math.min(4, +(z * (e.deltaY > 0 ? 0.9 : 1.1)).toFixed(2))));
-  }
 
   function handleMouseDown(e: React.MouseEvent) {
     if (zoom <= 1) return;
@@ -1042,7 +1050,6 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
             {/* 画像エリア */}
             <div
               ref={scrollRef}
-              onWheel={handleWheel}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseUp={handleMouseUp}
