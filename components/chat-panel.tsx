@@ -947,6 +947,9 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ dragging: boolean; startX: number; startY: number; scrollLeft: number; scrollTop: number }>({
+    dragging: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0,
+  });
 
   // ズーム変更後にスクロール位置を中央に合わせる
   useEffect(() => {
@@ -968,6 +971,26 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
     e.preventDefault();
     setZoom(z => Math.max(0.5, Math.min(4, +(z * (e.deltaY > 0 ? 0.9 : 1.1)).toFixed(2))));
   }
+
+  function handleMouseDown(e: React.MouseEvent) {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    const el = scrollRef.current;
+    if (!el) return;
+    dragRef.current = { dragging: true, startX: e.clientX, startY: e.clientY, scrollLeft: el.scrollLeft, scrollTop: el.scrollTop };
+  }
+
+  function handleMouseMove(e: React.MouseEvent) {
+    const d = dragRef.current;
+    if (!d.dragging) return;
+    e.preventDefault();
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollLeft = d.scrollLeft - (e.clientX - d.startX);
+    el.scrollTop  = d.scrollTop  - (e.clientY - d.startY);
+  }
+
+  function handleMouseUp() { dragRef.current.dragging = false; }
 
   return (
     <>
@@ -1020,7 +1043,11 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
             <div
               ref={scrollRef}
               onWheel={handleWheel}
-              style={{ background: "#111", overflow: "auto", cursor: zoom > 1 ? "grab" : "default", flexShrink: 0, height: "72vh" }}
+              onMouseDown={handleMouseDown}
+              onMouseMove={handleMouseMove}
+              onMouseUp={handleMouseUp}
+              onMouseLeave={handleMouseUp}
+              style={{ background: "#111", overflow: "auto", cursor: zoom > 1 ? (dragRef.current.dragging ? "grabbing" : "grab") : "default", flexShrink: 0, height: "72vh", userSelect: "none" }}
             >
               {/* スクロール領域をzoomに応じて拡大 → 画像は中央に配置 */}
               <div style={{
