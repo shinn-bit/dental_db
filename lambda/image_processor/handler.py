@@ -135,11 +135,34 @@ def nearby_text(page, img_rect, margin: int = 60) -> str:
 
 # ── Bedrock Vision ────────────────────────────────────────────────────────────
 
+VISION_PROMPT = """\
+以下の基準で、この歯科医療資料中の画像を判定してください。
+
+【出力形式】
+- スキップすべき場合: 最初の1行に「SKIP」とだけ出力（他は何も書かない）
+- 保存すべき場合: 内容を150字以内の日本語で説明
+
+【スキップ基準】（次のいずれかに該当）
+- 章扉・セクション扉・プロローグ扉（タイトル文字や章番号のみ）
+- 出版社ロゴ・著作権表示・奥付
+- 広告・商品宣伝ページ
+- 内容説明のない人物イラスト・キャラクター挿絵
+- 余白・背景・装飾的な模様
+
+【保存基準】（次のいずれかに該当）
+- 表・グラフ・数値データの比較
+- 解剖図・模式図・フローチャート・手順図
+- X線・CT・MRI・口腔内写真（臨床所見）
+- 器具・材料の形状や使用方法を示す図
+- 症例写真・治療前後の比較
+- 組織図・顕微鏡写真
+
+判定のみ出力。前置き・補足・理由は不要。\
+"""
+
+
 def describe_with_vision(img_bytes: bytes, media_type: str = "image/jpeg") -> str:
-    prompt = (
-        "この歯科医療資料の画像・図を見て、内容を日本語で簡潔に説明してください。"
-        "手順図・解剖図・X線・処置写真など、何を示しているかと重要な情報を100字以内でまとめてください。"
-    )
+    """画像を分類・説明する。スキップ対象なら空文字を返す。"""
     body = {
         "anthropic_version": "bedrock-2023-05-31",
         "max_tokens": 300,
@@ -155,7 +178,7 @@ def describe_with_vision(img_bytes: bytes, media_type: str = "image/jpeg") -> st
                         "data": base64.b64encode(img_bytes).decode("utf-8"),
                     },
                 },
-                {"type": "text", "text": prompt},
+                {"type": "text", "text": VISION_PROMPT},
             ],
         }],
     }
@@ -166,9 +189,13 @@ def describe_with_vision(img_bytes: bytes, media_type: str = "image/jpeg") -> st
         accept="application/json",
     )
     payload = json.loads(resp["body"].read().decode("utf-8"))
-    return "".join(
+    text = "".join(
         item.get("text", "") for item in payload.get("content", []) if item.get("type") == "text"
     ).strip()
+    # モデルが SKIP と判定した場合は空文字を返す
+    if text.upper().startswith("SKIP"):
+        return ""
+    return text
 
 # ── 画像抽出（バッチ対応） ────────────────────────────────────────────────────
 
@@ -335,6 +362,73 @@ def append_images_to_kb(file_id: str, images: list[dict]):
 
 # ── エントリーポイント ────────────────────────────────────────────────────────
 
+def handler_redescribe_images(file_id: str) -> dict:
+    """既存の images[] をS3から取得してVisionで再判定する。PDFの再DLは不要。"""
+    try:
+        metadata = get_metadata(file_id)
+    except Exception as e:
+        return {"status": "FAILED", "fileId": file_id, "error": str(e)}
+
+    images = metadata.get("images", [])
+    if not images:
+        return {"status": "SKIPPED", "fileId": file_id, "reason": "no images"}
+
+    kept, skipped = [], 0
+    for img in images:
+        s3_key = img.get("s3Key", "")
+        if not s3_key:
+            continue
+        try:
+            obj = s3.get_object(Bucket=S3_BUCKET, Key=s3_key)
+            img_bytes = obj["Body"].read()
+        except Exception as e:
+            err = str(e)
+            if "AccessDenied" in err or "NoSuchKey" in err or "404" in err:
+                # オブジェクトが存在しない（S3はListBucketなしで404の代わりに403を返す）
+                print(f"[redescribe] 存在しないためスキップ: {s3_key}")
+                skipped += 1
+            else:
+                print(f"[redescribe] 画像取得失敗（保持）{s3_key}: {e}")
+                kept.append(img)
+            continue
+
+        ext = s3_key.rsplit(".", 1)[-1].lower() if "." in s3_key else "jpeg"
+        _mt_map = {"png": "image/png", "jpeg": "image/jpeg", "jpg": "image/jpeg",
+                   "gif": "image/gif", "webp": "image/webp"}
+        img_media_type = _mt_map.get(ext, "image/jpeg")
+        try:
+            new_desc = describe_with_vision(img_bytes, img_media_type)
+        except Exception as e:
+            print(f"[redescribe] Vision失敗 {s3_key}: {e}")
+            kept.append(img)
+            continue
+
+        if not new_desc:
+            # SKIP判定 → S3から削除
+            try:
+                s3.delete_object(Bucket=S3_BUCKET, Key=s3_key)
+            except Exception:
+                pass
+            print(f"[redescribe] SKIP → 削除: p{img['page']} {s3_key}")
+            skipped += 1
+        else:
+            kept.append({**img, "description": new_desc, "descriptionSource": "vision"})
+
+    # インデックスを振り直す
+    for i, img in enumerate(kept):
+        img["index"] = i
+
+    metadata["images"] = kept
+    save_metadata(metadata)
+
+    # KBドキュメントを画像説明で更新
+    if kept:
+        append_images_to_kb(file_id, kept)
+
+    print(f"[redescribe] 完了: 保持={len(kept)} スキップ={skipped}")
+    return {"status": "COMPLETED", "fileId": file_id, "kept": len(kept), "skipped": skipped}
+
+
 def handler_thumbnail_only(file_id: str) -> dict:
     """PDFのページ1サムネイルのみを生成する。画像抽出はスキップ。"""
     try:
@@ -370,6 +464,8 @@ def handler_thumbnail_only(file_id: str) -> dict:
 def handler(event, _context):
     if event.get("action") == "generate_thumbnail_only":
         return handler_thumbnail_only(event.get("fileId", ""))
+    if event.get("action") == "redescribe_images":
+        return handler_redescribe_images(event.get("fileId", ""))
 
     file_id = event.get("fileId")
     if not file_id:
