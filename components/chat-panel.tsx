@@ -945,6 +945,20 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
 
 function ImageStrip({ images }: { images: ChatImage[] }) {
   const [lightbox, setLightbox] = useState<number | null>(null);
+  const [zoom, setZoom] = useState(1);
+
+  function openAt(i: number) { setLightbox(i); setZoom(1); }
+  function close() { setLightbox(null); setZoom(1); }
+  function prev() { setLightbox(l => (l ?? 1) - 1); setZoom(1); }
+  function next() { setLightbox(l => (l ?? 0) + 1); setZoom(1); }
+  function zoomIn() { setZoom(z => Math.min(4, +(z + 0.25).toFixed(2))); }
+  function zoomOut() { setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2))); }
+  function zoomReset() { setZoom(1); }
+
+  function handleWheel(e: React.WheelEvent) {
+    e.preventDefault();
+    setZoom(z => Math.max(0.5, Math.min(4, +(z * (e.deltaY > 0 ? 0.9 : 1.1)).toFixed(2))));
+  }
 
   return (
     <>
@@ -954,15 +968,12 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
         </div>
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
           {images.map((img, i) => (
-            <button
-              key={i}
-              type="button"
-              onClick={() => setLightbox(i)}
+            <button key={i} type="button" onClick={() => openAt(i)}
               style={{ flexShrink: 0, width: 160, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "#f0f0ee", cursor: "zoom-in", padding: 0 }}
               title={`${img.documentName.replace(/\.[^.]+$/, "")} p.${img.page}`}
             >
               <img src={img.url} alt="" style={{ width: "100%", aspectRatio: "3/4", objectFit: "contain", display: "block" }} />
-              <div style={{ padding: "4px 8px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ padding: "4px 8px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", display: "flex", justifyContent: "space-between" }}>
                 <span style={{ fontSize: 10, color: "var(--ink-muted)" }}>p.{img.page}</span>
                 <span style={{ fontSize: 10, color: "var(--ink-faint)" }}>{i + 1}/{images.length}</span>
               </div>
@@ -972,39 +983,47 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
       </div>
 
       {lightbox !== null ? (
-        <div
-          onClick={() => setLightbox(null)}
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.78)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}
+        <div onClick={close}
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.88)", zIndex: 9999, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}
         >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{ background: "#fff", borderRadius: 12, overflow: "hidden", maxWidth: 780, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: "#fff", borderRadius: 12, overflow: "hidden", width: "min(96vw, 1100px)", maxHeight: "96vh", display: "flex", flexDirection: "column" }}
           >
-            <div style={{ position: "relative", background: "#f0f0f0", display: "flex", alignItems: "center", justifyContent: "center", maxHeight: "55vh" }}>
-              <img
-                src={images[lightbox].url}
-                alt=""
-                style={{ maxWidth: "100%", maxHeight: "55vh", objectFit: "contain", display: "block" }}
-              />
-              <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
-                {lightbox > 0 && (
-                  <button type="button" onClick={() => setLightbox(lightbox - 1)}
-                    style={{ background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 16 }}>‹</button>
-                )}
-                {lightbox < images.length - 1 && (
-                  <button type="button" onClick={() => setLightbox(lightbox + 1)}
-                    style={{ background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 10px", cursor: "pointer", fontSize: 16 }}>›</button>
-                )}
-                <button type="button" onClick={() => setLightbox(null)}
-                  style={{ background: "rgba(0,0,0,0.5)", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontSize: 14 }}>✕</button>
+            {/* ツールバー */}
+            <div style={{ background: "#1e1e1e", padding: "8px 12px", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <button type="button" onClick={prev} disabled={lightbox === 0}
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: 5, padding: "3px 10px", cursor: lightbox === 0 ? "default" : "pointer", fontSize: 18, opacity: lightbox === 0 ? 0.3 : 1 }}>‹</button>
+              <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 12, minWidth: 48, textAlign: "center" }}>{lightbox + 1} / {images.length}</span>
+              <button type="button" onClick={next} disabled={lightbox === images.length - 1}
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: 5, padding: "3px 10px", cursor: lightbox === images.length - 1 ? "default" : "pointer", fontSize: 18, opacity: lightbox === images.length - 1 ? 0.3 : 1 }}>›</button>
+              <div style={{ flex: 1 }} />
+              <button type="button" onClick={zoomOut}
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontSize: 15 }}>－</button>
+              <button type="button" onClick={zoomReset}
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "rgba(255,255,255,0.8)", borderRadius: 5, padding: "3px 8px", cursor: "pointer", fontSize: 11, minWidth: 44, textAlign: "center" }}>{Math.round(zoom * 100)}%</button>
+              <button type="button" onClick={zoomIn}
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontSize: 15 }}>＋</button>
+              <button type="button" onClick={close}
+                style={{ background: "none", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", borderRadius: 5, padding: "3px 10px", cursor: "pointer", fontSize: 14, marginLeft: 8 }}>✕</button>
+            </div>
+
+            {/* 画像エリア */}
+            <div onWheel={handleWheel}
+              style={{ background: "#111", overflow: zoom > 1 ? "auto" : "hidden", cursor: zoom > 1 ? "grab" : "default", flexShrink: 0 }}
+            >
+              <div style={{ width: zoom <= 1 ? "100%" : `${zoom * 100}%`, minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <img src={images[lightbox].url} alt="" draggable={false}
+                  style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain", display: "block", userSelect: "none" }}
+                />
               </div>
             </div>
-            <div style={{ padding: "14px 18px", overflowY: "auto" }}>
-              <div style={{ fontSize: 11, color: "var(--ink-muted)", marginBottom: 6, letterSpacing: "0.06em" }}>
+
+            {/* 説明 */}
+            <div style={{ padding: "12px 18px", borderTop: "1px solid var(--line-soft)", overflowY: "auto", maxHeight: "20vh", flexShrink: 0 }}>
+              <div style={{ fontSize: 11, color: "var(--ink-muted)", marginBottom: 5, letterSpacing: "0.05em" }}>
                 {images[lightbox].documentName.replace(/\.[^.]+$/, "")} — {images[lightbox].page}ページ
-                <span style={{ marginLeft: 8, color: "var(--ink-faint)" }}>{lightbox + 1} / {images.length}</span>
               </div>
-              <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.7 }}>{images[lightbox].description}</div>
+              <div style={{ fontSize: 13, color: "var(--ink)", lineHeight: 1.75 }}>{images[lightbox].description}</div>
             </div>
           </div>
         </div>
