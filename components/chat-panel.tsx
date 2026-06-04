@@ -952,18 +952,21 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
         <div className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.08em", marginBottom: 8 }}>
           関連資料の画像 {images.length}枚
         </div>
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 6 }}>
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8, scrollSnapType: "x mandatory" }}>
           {images.map((img, i) => (
             <button
               key={i}
               type="button"
               onClick={() => setLightbox(i)}
-              style={{ flexShrink: 0, width: 120, height: 90, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "#f8f9fa", cursor: "zoom-in", padding: 0, position: "relative" }}
+              style={{ flexShrink: 0, width: "85%", maxWidth: 480, border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", background: "#f8f9fa", cursor: "zoom-in", padding: 0, position: "relative", scrollSnapAlign: "start" }}
               title={`${img.documentName.replace(/\.[^.]+$/, "")} p.${img.page}`}
             >
-              <img src={img.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
-              <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, background: "rgba(0,0,0,0.45)", color: "#fff", fontSize: 9, padding: "2px 5px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: "0.04em" }}>
-                p.{img.page}
+              <img src={img.url} alt="" style={{ width: "100%", aspectRatio: "4/3", objectFit: "contain", display: "block", background: "#f0f0ee" }} />
+              <div style={{ padding: "6px 10px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: "var(--ink-muted)", letterSpacing: "0.04em" }}>
+                  {img.documentName.replace(/\.[^.]+$/, "").slice(0, 24)}{img.documentName.length > 24 ? "…" : ""} — p.{img.page}
+                </span>
+                <span style={{ fontSize: 10, color: "var(--ink-faint)" }}>{i + 1}/{images.length}</span>
               </div>
             </button>
           ))}
