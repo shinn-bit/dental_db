@@ -952,20 +952,18 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
         <div className="tiny" style={{ color: "var(--ink-muted)", letterSpacing: "0.08em", marginBottom: 8 }}>
           関連資料の画像 {images.length}枚
         </div>
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8, scrollSnapType: "x mandatory" }}>
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
           {images.map((img, i) => (
             <button
               key={i}
               type="button"
               onClick={() => setLightbox(i)}
-              style={{ flexShrink: 0, width: "85%", maxWidth: 480, border: "1px solid var(--line)", borderRadius: 10, overflow: "hidden", background: "#f8f9fa", cursor: "zoom-in", padding: 0, position: "relative", scrollSnapAlign: "start" }}
+              style={{ flexShrink: 0, width: 160, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "#f0f0ee", cursor: "zoom-in", padding: 0 }}
               title={`${img.documentName.replace(/\.[^.]+$/, "")} p.${img.page}`}
             >
-              <img src={img.url} alt="" style={{ width: "100%", aspectRatio: "4/3", objectFit: "contain", display: "block", background: "#f0f0ee" }} />
-              <div style={{ padding: "6px 10px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", textAlign: "left", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: "var(--ink-muted)", letterSpacing: "0.04em" }}>
-                  {img.documentName.replace(/\.[^.]+$/, "").slice(0, 24)}{img.documentName.length > 24 ? "…" : ""} — p.{img.page}
-                </span>
+              <img src={img.url} alt="" style={{ width: "100%", aspectRatio: "3/4", objectFit: "contain", display: "block" }} />
+              <div style={{ padding: "4px 8px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 10, color: "var(--ink-muted)" }}>p.{img.page}</span>
                 <span style={{ fontSize: 10, color: "var(--ink-faint)" }}>{i + 1}/{images.length}</span>
               </div>
             </button>
