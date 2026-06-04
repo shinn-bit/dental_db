@@ -946,13 +946,22 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
 function ImageStrip({ images }: { images: ChatImage[] }) {
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [zoom, setZoom] = useState(1);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // ズーム変更後にスクロール位置を中央に合わせる
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+    el.scrollTop  = (el.scrollHeight - el.clientHeight) / 2;
+  }, [zoom]);
 
   function openAt(i: number) { setLightbox(i); setZoom(1); }
   function close() { setLightbox(null); setZoom(1); }
   function prev() { setLightbox(l => (l ?? 1) - 1); setZoom(1); }
   function next() { setLightbox(l => (l ?? 0) + 1); setZoom(1); }
-  function zoomIn() { setZoom(z => Math.min(4, +(z + 0.25).toFixed(2))); }
-  function zoomOut() { setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2))); }
+  function zoomIn()    { setZoom(z => Math.min(4, +(z + 0.25).toFixed(2))); }
+  function zoomOut()   { setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2))); }
   function zoomReset() { setZoom(1); }
 
   function handleWheel(e: React.WheelEvent) {
@@ -969,13 +978,13 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 8 }}>
           {images.map((img, i) => (
             <button key={i} type="button" onClick={() => openAt(i)}
-              style={{ flexShrink: 0, width: 160, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "#f0f0ee", cursor: "zoom-in", padding: 0 }}
+              style={{ flexShrink: 0, width: 210, border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", background: "#f0f0ee", cursor: "zoom-in", padding: 0 }}
               title={`${img.documentName.replace(/\.[^.]+$/, "")} p.${img.page}`}
             >
               <img src={img.url} alt="" style={{ width: "100%", aspectRatio: "3/4", objectFit: "contain", display: "block" }} />
-              <div style={{ padding: "4px 8px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", display: "flex", justifyContent: "space-between" }}>
-                <span style={{ fontSize: 10, color: "var(--ink-muted)" }}>p.{img.page}</span>
-                <span style={{ fontSize: 10, color: "var(--ink-faint)" }}>{i + 1}/{images.length}</span>
+              <div style={{ padding: "5px 10px", background: "var(--panel-deep)", borderTop: "1px solid var(--line-soft)", display: "flex", justifyContent: "space-between" }}>
+                <span style={{ fontSize: 11, color: "var(--ink-muted)" }}>p.{img.page}</span>
+                <span style={{ fontSize: 11, color: "var(--ink-faint)" }}>{i + 1}/{images.length}</span>
               </div>
             </button>
           ))}
@@ -1008,12 +1017,20 @@ function ImageStrip({ images }: { images: ChatImage[] }) {
             </div>
 
             {/* 画像エリア */}
-            <div onWheel={handleWheel}
-              style={{ background: "#111", overflow: zoom > 1 ? "auto" : "hidden", cursor: zoom > 1 ? "grab" : "default", flexShrink: 0 }}
+            <div
+              ref={scrollRef}
+              onWheel={handleWheel}
+              style={{ background: "#111", overflow: "auto", cursor: zoom > 1 ? "grab" : "default", flexShrink: 0, height: "72vh" }}
             >
-              <div style={{ width: zoom <= 1 ? "100%" : `${zoom * 100}%`, minHeight: "70vh", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {/* スクロール領域をzoomに応じて拡大 → 画像は中央に配置 */}
+              <div style={{
+                display: "flex", alignItems: "center", justifyContent: "center",
+                width: `${Math.max(100, zoom * 100)}%`,
+                height: `${Math.max(72, zoom * 72)}vh`,
+                minWidth: "100%", minHeight: "72vh",
+              }}>
                 <img src={images[lightbox].url} alt="" draggable={false}
-                  style={{ maxWidth: "100%", maxHeight: "70vh", objectFit: "contain", display: "block", userSelect: "none" }}
+                  style={{ width: "100%", height: "100%", objectFit: "contain", display: "block", userSelect: "none" }}
                 />
               </div>
             </div>
