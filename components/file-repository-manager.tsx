@@ -241,6 +241,8 @@ export function FileRepositoryManager() {
     setKbSyncLoading(true);
     try {
       await fetch("/api/kb-sync", { method: "POST" });
+      // Lambdaが非同期のためファイルが"syncing"になるまで少し待ってからリロード
+      await new Promise(r => setTimeout(r, 3000));
       await loadFiles({ updateNotice: false });
     } catch (e) {
       console.error("[kb-sync]", e);

@@ -379,7 +379,8 @@ def run_batch_kb_sync(event):
             if not key.endswith(".json"):
                 continue
             file_id = key[len(metadata_prefix):][:-5]  # "metadata/" と ".json" を除去
-            if not file_id or "_" not in file_id:
+            # UUID形式（8-4-4-4-12のハイフン区切り）以外はスキップ
+            if not file_id or len(file_id) < 32 or "-" not in file_id:
                 continue
             try:
                 raw = s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8-sig")
