@@ -25,20 +25,8 @@ from datetime import datetime, timezone
 import boto3
 from botocore.config import Config
 
-# pymupdf 同梱ライブラリを ctypes で先にロードしておく（LD_LIBRARY_PATH より確実）
-import ctypes as _ctypes
-_pymupdf_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pymupdf")
-if os.path.isdir(_pymupdf_dir):
-    for _lib in ["libmupdf.so.24.2", "libmupdfcpp.so.24.2", "_mupdf.so"]:
-        _lib_path = os.path.join(_pymupdf_dir, _lib)
-        if os.path.exists(_lib_path):
-            try:
-                _ctypes.CDLL(_lib_path)
-            except OSError:
-                pass
-
 try:
-    import fitz  # PyMuPDF
+    import fitz  # PyMuPDF (dental-pymupdf-layer)
     FITZ_AVAILABLE = True
 except (ImportError, OSError):
     FITZ_AVAILABLE = False
