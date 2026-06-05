@@ -1,10 +1,11 @@
 ﻿import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { StartExecutionCommand } from "@aws-sdk/client-sfn";
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 import { NextResponse } from "next/server";
 import { apiErrorResponse } from "@/lib/api-error";
-import { createS3Client, createStepFunctionsClient } from "@/lib/aws";
+import { createS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
+import { fromIni } from "@aws-sdk/credential-providers";
 import {
   createMetadataS3Key,
   normalizeFileMetadata,
@@ -22,18 +23,20 @@ async function bodyToString(body: unknown) {
   return (body as { transformToString: () => Promise<string> }).transformToString();
 }
 
-function createPrepareExecutionName(fileId: string) {
-  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  return `prepare-${fileId}-${suffix}`.replace(/[^A-Za-z0-9-_]/g, "-").slice(0, 80);
+function createSqsClient() {
+  const credentials = appEnv.awsProfile ? fromIni({ profile: appEnv.awsProfile }) : undefined;
+  return new SQSClient({
+    region: appEnv.awsRegion,
+    ...(credentials ? { credentials } : {}),
+  });
 }
 
-async function startPrepareWorkflow(fileId: string) {
-  const stateMachineArn = requireEnv(appEnv.prepareStateMachineArn, "PREPARE_STATE_MACHINE_ARN");
-  await createStepFunctionsClient().send(
-    new StartExecutionCommand({
-      stateMachineArn,
-      name: createPrepareExecutionName(fileId),
-      input: JSON.stringify({ fileId })
+async function enqueuePrepareJob(fileId: string) {
+  const queueUrl = requireEnv(appEnv.prepareQueueUrl, "PREPARE_QUEUE_URL");
+  await createSqsClient().send(
+    new SendMessageCommand({
+      QueueUrl: queueUrl,
+      MessageBody: JSON.stringify({ fileId }),
     })
   );
 }
@@ -112,7 +115,7 @@ export async function POST(request: Request) {
     );
 
     if (shouldPrepare) {
-      await startPrepareWorkflow(metadata.id);
+      await enqueuePrepareJob(metadata.id);
     }
 
     return NextResponse.json({ file: metadata });

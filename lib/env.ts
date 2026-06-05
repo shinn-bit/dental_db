@@ -7,6 +7,7 @@ export const appEnv = {
   s3FilePrefix: process.env.S3_FILE_PREFIX || process.env.S3_MANUAL_PREFIX || "manuals/",
   s3MetadataPrefix: process.env.S3_METADATA_PREFIX || "metadata/",
   prepareStateMachineArn: process.env.APP_PREPARE_STATE_MACHINE_ARN || process.env.PREPARE_STATE_MACHINE_ARN || "",
+  prepareQueueUrl: process.env.PREPARE_QUEUE_URL || "",
   summaryStateMachineArn: process.env.APP_SUMMARY_STATE_MACHINE_ARN || process.env.SUMMARY_STATE_MACHINE_ARN || "",
   bedrockKnowledgeBaseId: process.env.BEDROCK_KNOWLEDGE_BASE_ID || "",
   bedrockDataSourceId: process.env.BEDROCK_DATA_SOURCE_ID || "",
