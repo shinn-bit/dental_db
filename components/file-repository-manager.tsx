@@ -328,10 +328,10 @@ export function FileRepositoryManager() {
           setAssignments(a => ({ ...a, [rf.id]: destFolderId }));
         }
       }
-      setFiles(cur => [...uploaded, ...cur]);
       setPendingFiles([]);
       setMemo("");
       setNotice(`${uploaded.length}件を資料庫に追加しました。`);
+      await loadFiles({ updateNotice: false });
     } catch {
       setNotice("アップロードに失敗しました。時間をおいて再度お試しください。");
     } finally {
