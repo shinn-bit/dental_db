@@ -267,11 +267,9 @@ export function FileRepositoryManager() {
     }
 
     // 自動トリガー:
-    // ① 処理中→完了の遷移を検知（従来）
-    // ② ページロード時点で既に同期待ちがある場合も起動（リロード対応）
-    const shouldAutoSync = needsSync && !isSyncing && !autoSyncFiredRef.current &&
-      (preparingCount === 0) &&
-      (prevPreparingCountRef.current > 0 || prevPreparingCountRef.current === -1);
+    // 処理中ファイルがない AND 同期待ちがある AND 同期中でない AND まだ起動していない
+    // prevPreparingCountRef の値に依らず起動（OCRが8秒以内に完了しても検知できる）
+    const shouldAutoSync = needsSync && !isSyncing && !autoSyncFiredRef.current && preparingCount === 0;
 
     if (shouldAutoSync) {
       autoSyncFiredRef.current = true;
@@ -702,6 +700,13 @@ export function FileRepositoryManager() {
 
         {/* ── Library panel (right) ── */}
         <section className="panel" style={{ display: "flex", flexDirection: "column", overflow: "hidden", minHeight: 0 }}>
+          {/* KB同期中バナー */}
+          {(files.some(f => f.ragSyncStatus === "syncing") || kbSyncLoading) && (
+            <div style={{ background: "var(--navy)", color: "#fff", padding: "8px 20px", display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, flexShrink: 0 }}>
+              <RefreshCw size={13} style={{ animation: "spin 1s linear infinite", flexShrink: 0 }} aria-hidden="true" />
+              <span>AIナレッジベースに同期中です。完了するまでしばらくお待ちください。</span>
+            </div>
+          )}
           {/* Header */}
           <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexShrink: 0 }}>
             {/* Breadcrumb */}
