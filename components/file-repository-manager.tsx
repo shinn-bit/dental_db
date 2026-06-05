@@ -287,7 +287,7 @@ export function FileRepositoryManager() {
   async function registerFiles() {
     if (!pendingFiles.length) { setNotice("ファイルを選択してください。"); return; }
     setIsUploading(true);
-    setNotice("S3へアップロードしています。");
+    setNotice("資料庫へアップロードしています。");
     try {
       const uploaded: RepositoryFile[] = [];
       for (const file of pendingFiles) {
@@ -324,7 +324,7 @@ export function FileRepositoryManager() {
       setMemo("");
       setNotice(`${uploaded.length}件を資料庫に追加しました。`);
     } catch {
-      setNotice("アップロードに失敗しました。SSO期限やS3設定を確認してください。");
+      setNotice("アップロードに失敗しました。時間をおいて再度お試しください。");
     } finally {
       setIsUploading(false);
     }
@@ -341,7 +341,7 @@ export function FileRepositoryManager() {
       setAssignments(a => { const next = { ...a }; delete next[file.id]; return next; });
       setNotice(`${file.name} を削除しました。`);
     } catch {
-      setNotice("削除に失敗しました。SSO期限やS3設定を確認してください。");
+      setNotice("削除に失敗しました。時間をおいて再度お試しください。");
     } finally {
       setDeletingId(null);
     }
