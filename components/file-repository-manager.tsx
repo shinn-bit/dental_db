@@ -233,13 +233,19 @@ export function FileRepositoryManager() {
   }, []);
 
   const prevPreparingCountRef = useRef(-1);
+  const [kbSyncLoading, setKbSyncLoading] = useState(false);
+  // ページ内でこのセッション中に同期を既に自動起動したかのフラグ
+  const autoSyncFiredRef = useRef(false);
 
   async function triggerKbSync() {
+    setKbSyncLoading(true);
     try {
       await fetch("/api/kb-sync", { method: "POST" });
       await loadFiles({ updateNotice: false });
     } catch (e) {
       console.error("[kb-sync]", e);
+    } finally {
+      setKbSyncLoading(false);
     }
   }
 
@@ -251,8 +257,22 @@ export function FileRepositoryManager() {
     const needsSync = files.some(
       f => f.preparationStatus === "completed" && f.ragSyncStatus === "not_started"
     );
+    const isSyncing = files.some(f => f.ragSyncStatus === "syncing");
 
-    if (prevPreparingCountRef.current > 0 && preparingCount === 0 && needsSync) {
+    // 処理中ファイルが出現したらフラグをリセット（新バッチ開始）
+    if (preparingCount > 0) {
+      autoSyncFiredRef.current = false;
+    }
+
+    // 自動トリガー:
+    // ① 処理中→完了の遷移を検知（従来）
+    // ② ページロード時点で既に同期待ちがある場合も起動（リロード対応）
+    const shouldAutoSync = needsSync && !isSyncing && !autoSyncFiredRef.current &&
+      (preparingCount === 0) &&
+      (prevPreparingCountRef.current > 0 || prevPreparingCountRef.current === -1);
+
+    if (shouldAutoSync) {
+      autoSyncFiredRef.current = true;
       triggerKbSync();
     }
     prevPreparingCountRef.current = preparingCount;
@@ -694,13 +714,13 @@ export function FileRepositoryManager() {
             </nav>
             <div className="row" style={{ gap: 8, flexShrink: 0 }}>
               {(() => {
-                const isSyncing = files.some(f => f.ragSyncStatus === "syncing");
+                const isSyncing = files.some(f => f.ragSyncStatus === "syncing") || kbSyncLoading;
                 const hasUnsynced = files.some(f => f.preparationStatus === "completed" && f.ragSyncStatus === "not_started");
                 return (
                   <Button variant="secondary" size="sm"
                     disabled={isSyncing}
                     onClick={triggerKbSync}
-                    title="準備完了ファイルをBedrockナレッジベースに一括同期します"
+                    title="準備完了ファイルをナレッジベースに一括同期します"
                     style={{ gap: 5, opacity: (!isSyncing && !hasUnsynced) ? 0.5 : 1 }}>
                     {isSyncing
                       ? <><RefreshCw size={12} style={{ animation: "spin 1s linear infinite" }} aria-hidden="true" />AI同期中</>
