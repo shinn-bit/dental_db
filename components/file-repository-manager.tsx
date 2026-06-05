@@ -286,6 +286,15 @@ export function FileRepositoryManager() {
 
   async function registerFiles() {
     if (!pendingFiles.length) { setNotice("ファイルを選択してください。"); return; }
+    // 同名ファイルの重複チェック
+    const duplicates = pendingFiles.filter(f =>
+      files.some(existing => existing.name === f.name)
+    );
+    if (duplicates.length > 0) {
+      const names = duplicates.map(f => f.name.replace(/\.[^.]+$/, "")).join("、");
+      const ok = window.confirm(`「${names}」はすでに資料庫に存在します。\n重複して追加しますか？`);
+      if (!ok) return;
+    }
     setIsUploading(true);
     setNotice("資料庫へアップロードしています。");
     try {
