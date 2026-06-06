@@ -233,16 +233,12 @@ export function FileRepositoryManager() {
     return () => { ignore = true; };
   }, []);
 
-  const prevPreparingCountRef = useRef(-1);
   const [kbSyncLoading, setKbSyncLoading] = useState(false);
-  // ページ内でこのセッション中に同期を既に自動起動したかのフラグ
-  const autoSyncFiredRef = useRef(false);
 
   async function triggerKbSync() {
     setKbSyncLoading(true);
     try {
       await fetch("/api/kb-sync", { method: "POST" });
-      // Lambdaが非同期のためファイルが"syncing"になるまで少し待ってからリロード
       await new Promise(r => setTimeout(r, 3000));
       await loadFiles({ updateNotice: false });
     } catch (e) {
@@ -253,39 +249,21 @@ export function FileRepositoryManager() {
   }
 
   useEffect(() => {
-    const preparingCount = files.filter(
-      f => f.preparationStatus === "processing"
-    ).length;
-
-    const needsSync = files.some(
-      f => f.preparationStatus === "completed" && f.ragSyncStatus === "not_started"
-    );
+    const preparingCount = files.filter(f => f.preparationStatus === "processing").length;
+    const needsSync = files.some(f => f.preparationStatus === "completed" && f.ragSyncStatus === "not_started");
     const isSyncing = files.some(f => f.ragSyncStatus === "syncing");
 
-    // 処理中ファイルが出現したらフラグをリセット（新バッチ開始）
-    if (preparingCount > 0) {
-      autoSyncFiredRef.current = false;
-    }
-
-    // 自動トリガー:
-    // 処理中ファイルがない AND 同期待ちがある AND 同期中でない AND まだ起動していない
-    // prevPreparingCountRef の値に依らず起動（OCRが8秒以内に完了しても検知できる）
-    const shouldAutoSync = needsSync && !isSyncing && !autoSyncFiredRef.current && preparingCount === 0;
-
-    if (shouldAutoSync) {
-      autoSyncFiredRef.current = true;
+    // 全ファイルの処理完了後、同期待ちがあればKB同期をトリガー
+    if (preparingCount === 0 && needsSync && !isSyncing && !kbSyncLoading) {
       triggerKbSync();
     }
-    prevPreparingCountRef.current = preparingCount;
 
-    const hasPending = preparingCount > 0 ||
-      files.some(f => f.ragSyncStatus === "syncing" ||
-                      f.summaryStatus === "processing" ||
-                      f.imageProcessingStatus === "processing");
+    const hasPending = preparingCount > 0 || needsSync || isSyncing ||
+      files.some(f => f.summaryStatus === "processing" || f.imageProcessingStatus === "processing");
     if (!hasPending) return;
     const timer = window.setInterval(() => loadFiles({ updateNotice: false }), 8000);
     return () => window.clearInterval(timer);
-  }, [files]);
+  }, [files, kbSyncLoading]);
 
   useEffect(() => {
     for (const f of files) {
