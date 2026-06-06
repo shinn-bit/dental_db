@@ -80,6 +80,19 @@ def save_metadata(metadata: dict):
     )
 
 
+def patch_metadata(file_id: str, **fields) -> dict:
+    """S3から最新メタデータを再読みして指定フィールドのみ更新して保存する。
+    並行して別プロセス（KB同期など）が更新したフィールドを上書きしない。"""
+    latest = get_metadata(file_id)
+    for k, v in fields.items():
+        if v is None:
+            latest.pop(k, None)
+        else:
+            latest[k] = v
+    save_metadata(latest)
+    return latest
+
+
 def download_pdf(s3_key: str) -> str:
     tmp = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
     tmp.close()
@@ -516,7 +529,7 @@ def handler(event, _context):
         thumb_key = generate_thumbnail(pdf_path, file_id)
         if thumb_key:
             metadata["thumbnailKey"] = thumb_key
-            save_metadata(metadata)
+            metadata = patch_metadata(file_id, thumbnailKey=thumb_key)
 
     # 画像抽出（このバッチ分のみ）
     try:
@@ -548,16 +561,18 @@ def handler(event, _context):
     if last_processed_page < total_pages - 1:
         next_start = last_processed_page + 1
 
-        # 途中結果をメタデータに保存
-        metadata["images"] = all_images
-        metadata["imageProcessingStatus"] = "processing"
-        metadata["imageProcessingError"] = ""
-        metadata["imageProcessingCheckpoint"] = {
-            "totalPages": total_pages,
-            "processedUpTo": last_processed_page,
-            "nextStartPage": next_start,
-        }
-        save_metadata(metadata)
+        # 途中結果をメタデータに保存（再読みして並行更新を保持）
+        metadata = patch_metadata(
+            file_id,
+            images=all_images,
+            imageProcessingStatus="processing",
+            imageProcessingError="",
+            imageProcessingCheckpoint={
+                "totalPages": total_pages,
+                "processedUpTo": last_processed_page,
+                "nextStartPage": next_start,
+            },
+        )
 
         # 自分自身を非同期で再起動（次のバッチ）
         try:
@@ -573,9 +588,8 @@ def handler(event, _context):
             print(f"[batch] 次のバッチを起動: startPage={next_start}")
         except Exception as e:
             # 自己呼び出し失敗は致命的
-            metadata["imageProcessingStatus"] = "failed"
-            metadata["imageProcessingError"] = f"次のバッチ起動失敗: {e}"
-            save_metadata(metadata)
+            patch_metadata(file_id, imageProcessingStatus="failed",
+                           imageProcessingError=f"次のバッチ起動失敗: {e}")
             return {"status": "FAILED", "fileId": file_id, "error": str(e)}
 
         return {
@@ -593,12 +607,15 @@ def handler(event, _context):
     except Exception as e:
         print(f"KB追記失敗（処理は続行）: {e}")
 
-    metadata["images"] = all_images
-    metadata["imageProcessingStatus"] = "completed"
-    metadata["imageProcessingError"] = ""
-    metadata["imageProcessedAt"] = now
-    metadata.pop("imageProcessingCheckpoint", None)
-    save_metadata(metadata)
+    # 最終保存：再読みして並行更新（ragSyncStatus等）を保持
+    patch_metadata(
+        file_id,
+        images=all_images,
+        imageProcessingStatus="completed",
+        imageProcessingError="",
+        imageProcessedAt=now,
+        imageProcessingCheckpoint=None,  # Noneはpopする
+    )
 
     caption_count = sum(1 for img in all_images if img["descriptionSource"] == "caption")
     vision_count  = sum(1 for img in all_images if img["descriptionSource"] == "vision")
