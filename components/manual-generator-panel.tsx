@@ -1410,58 +1410,138 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     a.target = "_blank"; a.rel = "noopener"; a.click();
   }
 
+  async function buildPptxBlob(): Promise<Blob> {
+    if (!document.querySelector('link[href*="Noto+Sans+JP"]')) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@700&display=swap";
+      document.head.appendChild(link);
+      await document.fonts.ready;
+    }
+    const { toPng } = await import("html-to-image");
+    const { default: pptxgen } = await import("pptxgenjs");
+
+    const container = document.createElement("div");
+    container.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:960px;overflow:hidden;";
+    document.body.appendChild(container);
+
+    const prs = new pptxgen();
+    prs.layout = "LAYOUT_16x9";
+
+    for (let i = 0; i < slidesHtml.length; i++) {
+      if (document.visibilityState === "hidden") {
+        setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} ⚠ このタブに戻ってください`);
+        await new Promise<void>(resolve => {
+          const fn = () => { if (document.visibilityState === "visible") { document.removeEventListener("visibilitychange", fn); resolve(); } };
+          document.addEventListener("visibilitychange", fn);
+        });
+      }
+      setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} このタブから離れないでください`);
+      const slideHtml = injectEmbeddedImages(slidesHtml[i], embeddedImageMap);
+      container.innerHTML = slideHtml;
+      const el = container.firstElementChild as HTMLElement | null;
+      if (!el) continue;
+      el.style.width = "960px"; el.style.height = "540px";
+      const dataUrl = await toPng(el, { width: 960, height: 540, pixelRatio: 1, fontEmbedCSS: "" });
+      const slide = prs.addSlide();
+      slide.addImage({ data: dataUrl, x: 0, y: 0, w: "100%", h: "100%" });
+    }
+
+    document.body.removeChild(container);
+    return await prs.write({ outputType: "blob" }) as Blob;
+  }
+
   async function downloadPptx() {
     if (!slidesHtml.length || !generatedTheme) return;
     setNotice("PPTX 生成中… このタブから離れないでください");
     try {
-      if (!document.querySelector('link[href*="Noto+Sans+JP"]')) {
-        const link = document.createElement("link");
-        link.rel = "stylesheet";
-        link.href = "https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=Noto+Serif+JP:wght@700&display=swap";
-        document.head.appendChild(link);
-        await document.fonts.ready;
-      }
-      const { toPng } = await import("html-to-image");
-      const { default: pptxgen } = await import("pptxgenjs");
-
-      const container = document.createElement("div");
-      container.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:960px;overflow:hidden;";
-      document.body.appendChild(container);
-
-      const prs = new pptxgen();
-      prs.layout = "LAYOUT_16x9";
-
-      for (let i = 0; i < slidesHtml.length; i++) {
-        if (document.visibilityState === "hidden") {
-          setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} ⚠ このタブに戻ってください`);
-          await new Promise<void>(resolve => {
-            const fn = () => { if (document.visibilityState === "visible") { document.removeEventListener("visibilitychange", fn); resolve(); } };
-            document.addEventListener("visibilitychange", fn);
-          });
-        }
-        setNotice(`PPTX 生成中… ${i + 1} / ${slidesHtml.length} このタブから離れないでください`);
-
-        // data-image プレースホルダーを実画像に置換してからレンダリング
-        const slideHtml = injectEmbeddedImages(slidesHtml[i], embeddedImageMap);
-
-        container.innerHTML = slideHtml;
-        const el = container.firstElementChild as HTMLElement | null;
-        if (!el) continue;
-        el.style.width = "960px"; el.style.height = "540px";
-        const dataUrl = await toPng(el, { width: 960, height: 540, pixelRatio: 1, fontEmbedCSS: "" });
-        const slide = prs.addSlide();
-        slide.addImage({ data: dataUrl, x: 0, y: 0, w: "100%", h: "100%" });
-      }
-
-      document.body.removeChild(container);
+      const blob = await buildPptxBlob();
       setNotice("");
-      const blob = await prs.write({ outputType: "blob" }) as Blob;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = `${generatedTheme}.pptx`; a.click();
       URL.revokeObjectURL(url);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "PPTX 生成に失敗しました");
+    }
+  }
+
+  async function saveToGoogleSlides() {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+    if (!clientId || !apiKey || !slidesHtml.length || !generatedTheme) return;
+    try {
+      // 1. スクリプトをロード
+      const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const s = document.createElement("script");
+        s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error(`読み込み失敗: ${src}`));
+        document.head.appendChild(s);
+      });
+      await Promise.all([
+        loadScript("https://accounts.google.com/gsi/client"),
+        loadScript("https://apis.google.com/js/api.js"),
+      ]);
+      await new Promise<void>(resolve => window.gapi.load("picker", resolve));
+
+      // 2. OAuth トークン取得
+      const token = await new Promise<string>((resolve, reject) => {
+        google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: (resp) => resp.access_token ? resolve(resp.access_token) : reject(new Error("Google 認証に失敗しました")),
+        }).requestAccessToken({ prompt: "" });
+      });
+
+      // 3. .pptx を生成
+      setNotice("PPTX 生成中… このタブから離れないでください");
+      const blob = await buildPptxBlob();
+
+      // 4. フォルダピッカー
+      setNotice("保存先フォルダを選択してください…");
+      const folderId = await new Promise<string | null>((resolve) => {
+        new google.picker.PickerBuilder()
+          .addView(
+            new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+              .setSelectFolderEnabled(true)
+              .setIncludeFolders(true)
+          )
+          .setOAuthToken(token)
+          .setDeveloperKey(apiKey)
+          .setTitle("保存先フォルダを選択")
+          .setCallback((data) => {
+            if (data.action === google.picker.Action.PICKED) resolve(data.docs?.[0]?.id ?? null);
+            else if (data.action === google.picker.Action.CANCEL) resolve(null);
+          })
+          .build()
+          .setVisible(true);
+      });
+
+      // 5. Drive にアップロード（.pptx → Google スライドに自動変換）
+      setNotice("Google スライドに保存中…");
+      const metadata: Record<string, unknown> = {
+        name: generatedTheme,
+        mimeType: "application/vnd.google-apps.presentation",
+      };
+      if (folderId) metadata.parents = [folderId];
+
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+      form.append("file", blob);
+
+      const uploadRes = await fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
+      );
+      if (!uploadRes.ok) throw new Error(`Drive アップロードエラー ${uploadRes.status}`);
+      const data = (await uploadRes.json()) as { id: string };
+
+      // 6. 新タブで開く
+      window.open(`https://docs.google.com/presentation/d/${data.id}/edit`, "_blank");
+      setNotice("✓ Google スライドに保存しました");
+      window.setTimeout(() => setNotice(n => n === "✓ Google スライドに保存しました" ? "" : n), 3000);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Google スライドへの保存に失敗しました");
     }
   }
 
@@ -1924,6 +2004,11 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
                 <Button variant="secondary" onClick={downloadPptx} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
                   <Download size={13} aria-hidden="true" />PowerPoint (.pptx)
                 </Button>
+                {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ? (
+                  <Button variant="secondary" onClick={saveToGoogleSlides} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                    <ExternalLink size={13} aria-hidden="true" />Google スライド
+                  </Button>
+                ) : null}
               </>
             ) : null}
           </div>
