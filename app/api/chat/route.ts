@@ -24,6 +24,7 @@ type ChatRequest = {
   files?: ChatSourceFile[];
   manuals?: ChatSourceFile[];
   bedrockSessionId?: string;
+  folderKeys?: string[]; // フォルダ選択時のknowledgeBaseKeyリスト
 };
 
 type ChatSourceFile = {
@@ -160,7 +161,11 @@ export async function POST(request: Request) {
         : "",
     ])
     .filter(Boolean);
-  const retrievalFilter = createSourceUriFilter(sourceUris);
+  // folderKeys: フォルダ選択時に渡されるknowledgeBaseKeyリスト
+  const folderUris = (body.folderKeys ?? [])
+    .filter(Boolean)
+    .map(k => `s3://${appEnv.s3BucketName}/${k}`);
+  const retrievalFilter = createSourceUriFilter([...sourceUris, ...folderUris]);
 
   const queryText = `${message}${attachmentContext}`;
 

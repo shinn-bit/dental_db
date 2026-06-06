@@ -21,6 +21,7 @@ type InsuranceChatRequest = {
   message?: string;
   attachments?: Attachment[];
   bedrockSessionId?: string;
+  folderKeys?: string[]; // 保険フォルダのknowledgeBaseKeyリスト
 };
 
 const IMAGE_FORMAT_MAP: Record<string, "jpeg" | "png" | "gif" | "webp"> = {
@@ -123,6 +124,14 @@ export async function POST(request: Request) {
 
   const queryText = `${message}${attachmentContext}`;
 
+  // 保険フォルダのファイルに絞ったフィルタを構築
+  const folderUris = (body.folderKeys ?? []).filter(Boolean).map(k => `s3://${appEnv.s3BucketName}/${k}`);
+  const retrievalFilter = folderUris.length > 0
+    ? folderUris.length === 1
+      ? { equals: { key: "x-amz-bedrock-kb-source-uri", value: folderUris[0] } }
+      : { orAll: folderUris.map(uri => ({ equals: { key: "x-amz-bedrock-kb-source-uri", value: uri } })) }
+    : undefined;
+
   try {
     const bedrockClient = createBedrockAgentRuntimeClient();
 
@@ -136,7 +145,10 @@ export async function POST(request: Request) {
             knowledgeBaseId,
             modelArn,
             retrievalConfiguration: {
-              vectorSearchConfiguration: { numberOfResults: 8 },
+              vectorSearchConfiguration: {
+                numberOfResults: 8,
+                ...(retrievalFilter ? { filter: retrievalFilter } : {}),
+              },
             },
             generationConfiguration: {
               promptTemplate: { textPromptTemplate: INSURANCE_PROMPT },
@@ -148,7 +160,10 @@ export async function POST(request: Request) {
         knowledgeBaseId,
         retrievalQuery: { text: queryText },
         retrievalConfiguration: {
-          vectorSearchConfiguration: { numberOfResults: 8 },
+          vectorSearchConfiguration: {
+            numberOfResults: 8,
+            ...(retrievalFilter ? { filter: retrievalFilter } : {}),
+          },
         },
       })).catch(() => ({ retrievalResults: [] as never[] })),
     ]);

@@ -205,10 +205,17 @@ export function FileRepositoryManager() {
     if (selectedFolderId && descendants.has(selectedFolderId)) setSelectedFolderId(null);
     setFolderMenuId(null);
   }
-  function moveFile(fileId: string, folderId: string | null) {
+  function moveFile(fileId: string, folderId: string | null, persistToS3 = true) {
     setAssignments(prev => ({ ...prev, [fileId]: folderId }));
     setDraggedId(null);
     setDropTargetId(null);
+    if (persistToS3) {
+      fetch(`/api/files/${fileId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ folderId: folderId ?? "" }),
+      }).catch(() => {});
+    }
   }
 
   // ── File operations (unchanged) ───────────────────────────────
@@ -440,14 +447,14 @@ export function FileRepositoryManager() {
     try {
       const res = await fetch(`/api/files/${selectedDetail.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ memo: detailDraft.memo.trim() })
+        body: JSON.stringify({ memo: detailDraft.memo.trim(), folderId: detailDraft.folderId ?? "" })
       });
       const data = (await res.json()) as { file?: StoredFileMetadata; error?: string };
       if (!res.ok || !data.file) throw new Error(data.error || "詳細を保存できませんでした。");
       const nextFile = toRepositoryFile(data.file);
       setFiles(cur => cur.map(f => f.id === nextFile.id ? nextFile : f));
       setSelectedDetail(nextFile);
-      moveFile(selectedDetail.id, detailDraft.folderId);
+      moveFile(selectedDetail.id, detailDraft.folderId, false); // S3はPUTで更新済み
       setNotice("詳細を保存しました。");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "詳細を保存できませんでした。");

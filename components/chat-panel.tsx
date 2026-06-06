@@ -48,6 +48,11 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   const [isDragOver, setIsDragOver] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
 
+  // フォルダフィルタ
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  const [fileList, setFileList] = useState<{ id: string; folderId: string; knowledgeBaseKey: string }[]>([]);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -72,6 +77,28 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
       .then((data: { sessions: SessionSummary[] }) =>
         setSessions((data.sessions ?? []).filter(s => s.type !== "insurance"))
       )
+      .catch(() => {});
+  }, []);
+
+  // フォルダ一覧とファイル一覧をロード
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("dental-repo-folders-v2");
+      const allFolders: { id: string; name: string; parentId: string | null }[] = raw ? JSON.parse(raw) : [];
+      setFolders(allFolders.map(f => ({ id: f.id, name: f.name })));
+    } catch {}
+    fetch("/api/files", { cache: "no-store" })
+      .then(r => r.json())
+      .then((data: { files: { id: string; folderId?: string; knowledgeBaseKey?: string }[] }) => {
+        const assignments: Record<string, string | null> = (() => {
+          try { return JSON.parse(localStorage.getItem("dental-repo-assignments-v2") ?? "{}"); } catch { return {}; }
+        })();
+        setFileList((data.files ?? []).map(f => ({
+          id: f.id,
+          folderId: assignments[f.id] ?? f.folderId ?? "",
+          knowledgeBaseKey: f.knowledgeBaseKey ?? "",
+        })));
+      })
       .catch(() => {});
   }, []);
 
@@ -256,6 +283,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
         }))
       );
 
+      const folderKeys = selectedFolderId
+        ? fileList.filter(f => f.folderId === selectedFolderId && f.knowledgeBaseKey).map(f => f.knowledgeBaseKey)
+        : [];
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -263,6 +293,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
           message,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(bedrockSessionId ? { bedrockSessionId } : {}),
+          ...(folderKeys.length > 0 ? { folderKeys } : {}),
         }),
       });
       const data = (await res.json()) as {
@@ -638,6 +669,16 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
               </span>
             </div>
             <div className="row" style={{ gap: 8 }}>
+              {folders.length > 0 && (
+                <select
+                  value={selectedFolderId ?? ""}
+                  onChange={e => { setSelectedFolderId(e.target.value || null); setBedrockSessionId(""); }}
+                  style={{ fontSize: 12, padding: "3px 8px", borderRadius: 6, border: "1px solid var(--line)", background: selectedFolderId ? "var(--navy-tint-soft)" : "var(--panel)", color: selectedFolderId ? "var(--navy)" : "var(--ink-soft)", cursor: "pointer", maxWidth: 180 }}
+                >
+                  <option value="">すべての資料</option>
+                  {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              )}
               <span className="dot ok" />
               <span className="tiny soft">資料の読み込み完了</span>
             </div>
