@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button, FileSpine, FieldLabel } from "@/components/ui";
 import { formatFileSize, getThumbnailLabel, type StoredFileMetadata } from "@/lib/file-assets";
+import { GoogleDrivePicker } from "@/components/google-drive-picker";
 
 // ── Types ────────────────────────────────────────────────────────
 type RepoFolder = { id: string; name: string; parentId: string | null };
@@ -643,6 +644,7 @@ export function FileRepositoryManager() {
               <Button variant="secondary" size="sm" style={{ marginTop: 14 }} onClick={() => fileInputRef.current?.click()}>
                 <Plus size={13} aria-hidden="true" />ファイルを選択
               </Button>
+              <GoogleDrivePicker onFilesSelected={addPendingFiles} disabled={isUploading} />
             </div>
 
             {/* Pending file list */}
