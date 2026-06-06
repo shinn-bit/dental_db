@@ -336,7 +336,7 @@ function createSourceUriFilter(
 ): RetrievalFilter | undefined {
   if (sourceUris.length === 0) return undefined;
   const filters = sourceUris.map((uri) => ({
-    equals: { key: "x-amz-bedrock-kb-source-uri", value: uri },
+    equals: { key: "x-amz-bedrock-kb-source-uri", value: { stringValue: uri } },
   }));
   if (filters.length === 1) return filters[0];
   return { orAll: filters };
