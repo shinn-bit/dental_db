@@ -219,6 +219,27 @@ export async function POST(request: Request) {
     }>;
     console.log(`[chat/images] retrieveResults=${retrievalResults.length}`);
 
+    // ── DEBUG: フォルダフィルタの動作確認 ──
+    if (folderUris.length > 0) {
+      console.log("[DEBUG] folderUris:", JSON.stringify(folderUris));
+      console.log("[DEBUG] filter:", JSON.stringify(retrievalFilter));
+      const filteredUris = retrievalResults.map(r => r.location?.s3Location?.uri ?? "");
+      console.log("[DEBUG] FILTERED result URIs:", JSON.stringify(filteredUris));
+      try {
+        const unfiltered = await bedrockClient.send(new RetrieveCommand({
+          knowledgeBaseId,
+          retrievalQuery: { text: queryText },
+          retrievalConfiguration: { vectorSearchConfiguration: { numberOfResults: 10 } },
+        }));
+        const unfilteredUris = (unfiltered.retrievalResults ?? []).map(r => r.location?.s3Location?.uri ?? "");
+        console.log("[DEBUG] UNFILTERED top10 URIs:", JSON.stringify(unfilteredUris));
+        const targetHit = unfilteredUris.some(u => folderUris.includes(u));
+        console.log("[DEBUG] target file in unfiltered results?:", targetHit);
+      } catch (e) {
+        console.log("[DEBUG] unfiltered retrieve failed:", String(e));
+      }
+    }
+
     const images = bucket && retrievalResults.length > 0
       ? await extractImagesFromRetrieveResults(retrievalResults, bucket, message).catch((err) => {
           console.error("[chat/images] extractImagesFromRetrieveResults failed:", String(err));
