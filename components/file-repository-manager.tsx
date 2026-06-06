@@ -1034,12 +1034,8 @@ function FileCard({ file, processing, blocked, deleting, onOpenSummary, onDetail
       <div className="row" style={{ gap: 4, fontSize: 11, color: "var(--ink-muted)", flexWrap: "wrap" }}>
         {ragSyncStatus === "completed" ? (
           <span className="row" style={{ gap: 5 }}><span className="dot ok" />AI参照可</span>
-        ) : ragSyncStatus === "syncing" ? (
-          <span className="row" style={{ gap: 5 }}><RefreshCw size={11} style={{ animation: "spin 1s linear infinite" }} aria-hidden="true" />AI同期中</span>
-        ) : preparationStatus === "processing" ? (
-          <span className="row" style={{ gap: 5 }}><RefreshCw size={11} aria-hidden="true" />準備中</span>
-        ) : preparationStatus === "completed" ? (
-          <span className="row" style={{ gap: 4 }}>AI同期待ち</span>
+        ) : (ragSyncStatus === "syncing" || preparationStatus === "processing" || preparationStatus === "completed") ? (
+          <span className="row" style={{ gap: 5 }}><RefreshCw size={11} style={{ animation: "spin 1s linear infinite" }} aria-hidden="true" />準備中</span>
         ) : needsOcr ? (
           <span className="row" style={{ gap: 4, color: "var(--warn)", background: "var(--warn-tint)", padding: "3px 8px", borderRadius: 4, fontWeight: 500 }}>文字の読み取りが必要</span>
         ) : (
