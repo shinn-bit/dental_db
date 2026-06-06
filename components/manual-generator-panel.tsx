@@ -1278,10 +1278,34 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
 
   async function saveToGoogleDocs() {
     const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
-    if (!clientId || !content || !generatedTheme) return;
-    setNotice("Google ドキュメントに保存中…");
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+    if (!clientId || !apiKey || !content || !generatedTheme) return;
+    setNotice("Google ドライブに接続中…");
     try {
-      // 1. .docx を生成
+      // 1. スクリプトをロード
+      const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const s = document.createElement("script");
+        s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error(`読み込み失敗: ${src}`));
+        document.head.appendChild(s);
+      });
+      await Promise.all([
+        loadScript("https://accounts.google.com/gsi/client"),
+        loadScript("https://apis.google.com/js/api.js"),
+      ]);
+      await new Promise<void>(resolve => window.gapi.load("picker", resolve));
+
+      // 2. OAuth トークン取得（drive.file スコープ）
+      const token = await new Promise<string>((resolve, reject) => {
+        google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: (resp) => resp.access_token ? resolve(resp.access_token) : reject(new Error("Google 認証に失敗しました")),
+        }).requestAccessToken({ prompt: "" });
+      });
+
+      // 3. .docx を生成
+      setNotice("文書を生成中…");
       const res = await fetch("/api/generate-manual/docx", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1290,36 +1314,36 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       if (!res.ok) throw new Error(`docx 生成エラー ${res.status}`);
       const blob = await res.blob();
 
-      // 2. GIS スクリプトをロード
-      if (!document.querySelector('script[src="https://accounts.google.com/gsi/client"]')) {
-        await new Promise<void>((resolve, reject) => {
-          const s = document.createElement("script");
-          s.src = "https://accounts.google.com/gsi/client";
-          s.onload = () => resolve();
-          s.onerror = () => reject(new Error("GIS スクリプトの読み込みに失敗しました"));
-          document.head.appendChild(s);
-        });
-      }
-
-      // 3. OAuth トークン取得（drive.file スコープ）
-      const token = await new Promise<string>((resolve, reject) => {
-        const client = google.accounts.oauth2.initTokenClient({
-          client_id: clientId,
-          scope: "https://www.googleapis.com/auth/drive.file",
-          callback: (resp) => {
-            if (resp.access_token) resolve(resp.access_token);
-            else reject(new Error("Google 認証に失敗しました"));
-          },
-        });
-        client.requestAccessToken({ prompt: "" });
+      // 4. フォルダピッカーで保存先を選択
+      setNotice("保存先フォルダを選択してください…");
+      const folderId = await new Promise<string | null>((resolve) => {
+        new google.picker.PickerBuilder()
+          .addView(
+            new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+              .setSelectFolderEnabled(true)
+              .setIncludeFolders(true)
+          )
+          .setOAuthToken(token)
+          .setDeveloperKey(apiKey)
+          .setTitle("保存先フォルダを選択")
+          .setCallback((data) => {
+            if (data.action === google.picker.Action.PICKED) resolve(data.docs?.[0]?.id ?? null);
+            else if (data.action === google.picker.Action.CANCEL) resolve(null);
+          })
+          .build()
+          .setVisible(true);
       });
 
-      // 4. Drive にアップロード（.docx → Google ドキュメントに自動変換）
-      const form = new FormData();
-      form.append("metadata", new Blob([JSON.stringify({
+      // 5. Drive にアップロード（.docx → Google ドキュメントに自動変換）
+      setNotice("Google ドキュメントに保存中…");
+      const metadata: Record<string, unknown> = {
         name: generatedTheme,
         mimeType: "application/vnd.google-apps.document",
-      })], { type: "application/json" }));
+      };
+      if (folderId) metadata.parents = [folderId];
+
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
       form.append("file", blob);
 
       const uploadRes = await fetch(
@@ -1327,10 +1351,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
       );
       if (!uploadRes.ok) throw new Error(`Drive アップロードエラー ${uploadRes.status}`);
-      const data = (await uploadRes.json()) as { id: string };
+      const data2 = (await uploadRes.json()) as { id: string };
 
-      // 5. 新タブで開く
-      window.open(`https://docs.google.com/document/d/${data.id}/edit`, "_blank");
+      // 6. 新タブで開く
+      window.open(`https://docs.google.com/document/d/${data2.id}/edit`, "_blank");
       setNotice("✓ Google ドキュメントに保存しました");
       window.setTimeout(() => setNotice(n => n === "✓ Google ドキュメントに保存しました" ? "" : n), 3000);
     } catch (error) {

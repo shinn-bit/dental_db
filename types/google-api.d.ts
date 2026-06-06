@@ -2,6 +2,7 @@ declare namespace google {
   namespace picker {
     const Action: { PICKED: string; CANCEL: string };
     const Feature: { MULTISELECT_ENABLED: string };
+    const ViewId: { FOLDERS: string; DOCS: string };
 
     class PickerBuilder {
       addView(view: DocsView): this;
@@ -9,9 +10,11 @@ declare namespace google {
       setDeveloperKey(key: string): this;
       enableFeature(feature: string): this;
       setCallback(cb: (data: PickerResponse) => void): this;
+      setTitle(title: string): this;
       build(): Picker;
     }
     class DocsView {
+      constructor(viewId?: string);
       setIncludeFolders(v: boolean): this;
       setSelectFolderEnabled(v: boolean): this;
     }
