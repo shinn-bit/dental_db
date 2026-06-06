@@ -50,8 +50,8 @@ export function InsuranceChatPanel({
   const [syncing, setSyncing] = useState(false);
   const [syncNotice, setSyncNotice] = useState("");
 
-  // 保険フォルダのknowledgeBaseKeyリスト（自動検出）
-  const [insuranceFolderKeys, setInsuranceFolderKeys] = useState<string[]>([]);
+  // 保険フォルダのID（自動検出）
+  const [insuranceFolderId, setInsuranceFolderId] = useState<string>("");
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -78,29 +78,13 @@ export function InsuranceChatPanel({
       .catch(() => {});
   }, []);
 
-  // 保険フォルダを自動検出してknowledgeBaseKeyリストを構築
+  // 保険フォルダのIDを自動検出
   useEffect(() => {
     try {
       const foldersRaw = localStorage.getItem("dental-repo-folders-v2");
       const folders: { id: string; name: string }[] = foldersRaw ? JSON.parse(foldersRaw) : [];
       const insuranceFolder = folders.find(f => f.name.includes("保険"));
-      if (!insuranceFolder) return;
-
-      const assignmentsRaw = localStorage.getItem("dental-repo-assignments-v2");
-      const assignments: Record<string, string | null> = assignmentsRaw ? JSON.parse(assignmentsRaw) : {};
-
-      fetch("/api/files", { cache: "no-store" })
-        .then(r => r.json())
-        .then((data: { files: { id: string; folderId?: string; knowledgeBaseKey?: string; ragSyncStatus?: string }[] }) => {
-          const keys = (data.files ?? [])
-            .filter(f => {
-              const fid = assignments[f.id] ?? f.folderId ?? "";
-              return fid === insuranceFolder.id && f.knowledgeBaseKey && f.ragSyncStatus === "completed";
-            })
-            .map(f => f.knowledgeBaseKey as string);
-          setInsuranceFolderKeys(keys);
-        })
-        .catch(() => {});
+      if (insuranceFolder) setInsuranceFolderId(insuranceFolder.id);
     } catch {}
   }, []);
 
@@ -222,7 +206,7 @@ export function InsuranceChatPanel({
           message,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(bedrockSessionId ? { bedrockSessionId } : {}),
-          ...(insuranceFolderKeys.length > 0 ? { folderKeys: insuranceFolderKeys } : {}),
+          ...(insuranceFolderId ? { folderId: insuranceFolderId } : {}),
         }),
       });
       const data = (await res.json()) as {

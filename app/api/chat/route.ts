@@ -24,7 +24,7 @@ type ChatRequest = {
   files?: ChatSourceFile[];
   manuals?: ChatSourceFile[];
   bedrockSessionId?: string;
-  folderKeys?: string[]; // フォルダ選択時のknowledgeBaseKeyリスト
+  folderId?: string; // フォルダ選択時のフォルダID
 };
 
 type ChatSourceFile = {
@@ -141,31 +141,8 @@ export async function POST(request: Request) {
       ? `\n\n--- 添付ファイルの内容 ---\n${attachmentParts.join("\n\n")}\n---`
       : "";
 
-  // Legacy: keep source file filter support
-  const selectedFiles = (body.files || body.manuals || []).filter(
-    (file) =>
-      file.fileName ||
-      file.knowledgeBaseKey ||
-      file.summaryKey ||
-      file.extractedTextKey
-  );
-  const sourceUris = selectedFiles
-    .flatMap((file) => [
-      file.knowledgeBaseKey
-        ? `s3://${appEnv.s3BucketName}/${file.knowledgeBaseKey}`
-        : file.summaryKey
-          ? `s3://${appEnv.s3BucketName}/${file.summaryKey}`
-          : "",
-      file.extractedTextKey
-        ? `s3://${appEnv.s3BucketName}/${file.extractedTextKey}`
-        : "",
-    ])
-    .filter(Boolean);
-  // folderKeys: フォルダ選択時に渡されるknowledgeBaseKeyリスト
-  const folderUris = (body.folderKeys ?? [])
-    .filter(Boolean)
-    .map(k => `s3://${appEnv.s3BucketName}/${k}`);
-  const retrievalFilter = createSourceUriFilter([...sourceUris, ...folderUris]);
+  // フォルダ選択時はfolderIdメタデータ属性でフィルタ（カスタムメタデータ方式）
+  const retrievalFilter = createFolderIdFilter(body.folderId);
   const queryText = `${message}${attachmentContext}`;
 
   try {
@@ -219,27 +196,6 @@ export async function POST(request: Request) {
     }>;
     console.log(`[chat/images] retrieveResults=${retrievalResults.length}`);
 
-    // ── DEBUG: フォルダフィルタの動作確認 ──
-    if (folderUris.length > 0) {
-      console.log("[DEBUG] folderUris:", JSON.stringify(folderUris));
-      console.log("[DEBUG] filter:", JSON.stringify(retrievalFilter));
-      const filteredUris = retrievalResults.map(r => r.location?.s3Location?.uri ?? "");
-      console.log("[DEBUG] FILTERED result URIs:", JSON.stringify(filteredUris));
-      try {
-        const unfiltered = await bedrockClient.send(new RetrieveCommand({
-          knowledgeBaseId,
-          retrievalQuery: { text: queryText },
-          retrievalConfiguration: { vectorSearchConfiguration: { numberOfResults: 10 } },
-        }));
-        const unfilteredUris = (unfiltered.retrievalResults ?? []).map(r => r.location?.s3Location?.uri ?? "");
-        console.log("[DEBUG] UNFILTERED top10 URIs:", JSON.stringify(unfilteredUris));
-        const targetHit = unfilteredUris.some(u => folderUris.includes(u));
-        console.log("[DEBUG] target file in unfiltered results?:", targetHit);
-      } catch (e) {
-        console.log("[DEBUG] unfiltered retrieve failed:", String(e));
-      }
-    }
-
     const images = bucket && retrievalResults.length > 0
       ? await extractImagesFromRetrieveResults(retrievalResults, bucket, message).catch((err) => {
           console.error("[chat/images] extractImagesFromRetrieveResults failed:", String(err));
@@ -249,7 +205,7 @@ export async function POST(request: Request) {
     console.log(`[chat/images] result: ${images.length} images`);
 
     // フォルダフィルタ適用かつ検索結果0件の場合は分かりやすいメッセージに差し替え
-    const answerText = retrievalResults.length === 0 && folderUris.length > 0
+    const answerText = retrievalResults.length === 0 && !!body.folderId
       ? "選択したフォルダの資料には、ご質問に関連する内容が見つかりませんでした。「すべての資料」に切り替えてもう一度お試しください。"
       : response.output?.text || "";
 
@@ -356,13 +312,7 @@ async function extractImagesFromRetrieveResults(
   return results;
 }
 
-function createSourceUriFilter(
-  sourceUris: string[]
-): RetrievalFilter | undefined {
-  if (sourceUris.length === 0) return undefined;
-  const filters = sourceUris.map((uri) => ({
-    equals: { key: "x-amz-bedrock-kb-source-uri", value: uri },
-  }));
-  if (filters.length === 1) return filters[0];
-  return { orAll: filters };
+function createFolderIdFilter(folderId?: string): RetrievalFilter | undefined {
+  if (!folderId) return undefined;
+  return { equals: { key: "folderId", value: folderId } };
 }

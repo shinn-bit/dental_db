@@ -293,6 +293,8 @@ def create_kb_document(event):
         create_knowledge_base_document_from_text(metadata, extracted_text),
         "text/markdown; charset=utf-8",
     )
+    # フォルダフィルタ用のメタデータサイドカーを生成（folderId未設定時は __none__）
+    write_kb_metadata_sidecar(bucket, kb_s3_key, metadata.get("folderId") or "__none__")
     metadata.update(
         {
             "knowledgeBaseKey": kb_s3_key,
@@ -304,6 +306,18 @@ def create_kb_document(event):
     )
     save_metadata(metadata)
     return {"fileId": file_id, "status": "KB_DOCUMENT_CREATED", "knowledgeBaseKey": kb_s3_key}
+
+
+def write_kb_metadata_sidecar(bucket, kb_s3_key, folder_id):
+    """Bedrock KB用のメタデータサイドカー（kb/{id}.md.metadata.json）を書き込む。
+    folderId属性でフォルダ単位のretrievalフィルタを可能にする。"""
+    sidecar = {"metadataAttributes": {"folderId": folder_id or "__none__"}}
+    s3.put_object(
+        Bucket=bucket,
+        Key=f"{kb_s3_key}.metadata.json",
+        Body=json.dumps(sidecar, ensure_ascii=False).encode("utf-8"),
+        ContentType="application/json; charset=utf-8",
+    )
 
 
 def start_kb_sync(event):
@@ -653,4 +667,39 @@ def handler(event, _context):
         return check_kb_sync(event)
     if action == "run_batch_kb_sync":
         return run_batch_kb_sync(event)
+    if action == "backfill_kb_metadata":
+        return backfill_kb_metadata(event)
     raise ValueError(f"Unknown action: {action}")
+
+
+def backfill_kb_metadata(event):
+    """既存の全KB文書に対してメタデータサイドカー（folderId）を生成する。
+    各ファイルのS3メタデータからfolderIdを読み取り、kb/{id}.md.metadata.json を作る。
+    一度実行すればよい。実行後はKB再同期が必要。"""
+    bucket = env("S3_BUCKET_NAME")
+    metadata_prefix = os.environ.get("S3_METADATA_PREFIX", "metadata/")
+    created = 0
+    skipped = 0
+    paginator = s3.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket, Prefix=metadata_prefix):
+        for obj in page.get("Contents", []):
+            key = obj["Key"]
+            if not key.endswith(".json"):
+                continue
+            file_id = key[len(metadata_prefix):][:-5]
+            if not file_id or len(file_id) < 32 or "-" not in file_id:
+                continue
+            try:
+                raw = s3.get_object(Bucket=bucket, Key=key)["Body"].read().decode("utf-8-sig")
+                meta = json.loads(raw)
+                kb_key = meta.get("knowledgeBaseKey")
+                if not kb_key:
+                    skipped += 1
+                    continue
+                write_kb_metadata_sidecar(bucket, kb_key, meta.get("folderId") or "__none__")
+                created += 1
+            except Exception as e:
+                print(f"[backfill] {file_id} 失敗: {e}")
+                skipped += 1
+    print(f"[backfill] 完了: 生成={created} スキップ={skipped}")
+    return {"status": "COMPLETED", "created": created, "skipped": skipped}

@@ -51,7 +51,6 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   // フォルダフィルタ
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
-  const [fileList, setFileList] = useState<{ id: string; folderId: string; knowledgeBaseKey: string }[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -80,28 +79,13 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
       .catch(() => {});
   }, []);
 
-  // フォルダ一覧とファイル一覧をロード
+  // フォルダ一覧をロード（フィルタ用）
   useEffect(() => {
     try {
       const raw = localStorage.getItem("dental-repo-folders-v2");
       const allFolders: { id: string; name: string; parentId: string | null }[] = raw ? JSON.parse(raw) : [];
       setFolders(allFolders.map(f => ({ id: f.id, name: f.name })));
     } catch {}
-    fetch("/api/files", { cache: "no-store" })
-      .then(r => r.json())
-      .then((data: { files: { id: string; folderId?: string; knowledgeBaseKey?: string; ragSyncStatus?: string }[] }) => {
-        const assignments: Record<string, string | null> = (() => {
-          try { return JSON.parse(localStorage.getItem("dental-repo-assignments-v2") ?? "{}"); } catch { return {}; }
-        })();
-        setFileList((data.files ?? [])
-          .filter(f => f.ragSyncStatus === "completed")
-          .map(f => ({
-            id: f.id,
-            folderId: assignments[f.id] ?? f.folderId ?? "",
-            knowledgeBaseKey: f.knowledgeBaseKey ?? "",
-          })));
-      })
-      .catch(() => {});
   }, []);
 
   // Load session specified via URL param
@@ -285,9 +269,6 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
         }))
       );
 
-      const folderKeys = selectedFolderId
-        ? fileList.filter(f => f.folderId === selectedFolderId && f.knowledgeBaseKey).map(f => f.knowledgeBaseKey)
-        : [];
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -295,7 +276,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
           message,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(bedrockSessionId ? { bedrockSessionId } : {}),
-          ...(folderKeys.length > 0 ? { folderKeys } : {}),
+          ...(selectedFolderId ? { folderId: selectedFolderId } : {}),
         }),
       });
       const data = (await res.json()) as {

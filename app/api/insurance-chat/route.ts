@@ -21,7 +21,7 @@ type InsuranceChatRequest = {
   message?: string;
   attachments?: Attachment[];
   bedrockSessionId?: string;
-  folderKeys?: string[]; // 保険フォルダのknowledgeBaseKeyリスト
+  folderId?: string; // 保険フォルダのID
 };
 
 const IMAGE_FORMAT_MAP: Record<string, "jpeg" | "png" | "gif" | "webp"> = {
@@ -124,12 +124,9 @@ export async function POST(request: Request) {
 
   const queryText = `${message}${attachmentContext}`;
 
-  // 保険フォルダのファイルに絞ったフィルタを構築
-  const folderUris = (body.folderKeys ?? []).filter(Boolean).map(k => `s3://${appEnv.s3BucketName}/${k}`);
-  const retrievalFilter = folderUris.length > 0
-    ? folderUris.length === 1
-      ? { equals: { key: "x-amz-bedrock-kb-source-uri", value: folderUris[0] } }
-      : { orAll: folderUris.map(uri => ({ equals: { key: "x-amz-bedrock-kb-source-uri", value: uri } })) }
+  // 保険フォルダのfolderIdでフィルタ（カスタムメタデータ方式）
+  const retrievalFilter = body.folderId
+    ? { equals: { key: "folderId", value: body.folderId } }
     : undefined;
 
   try {

@@ -1,4 +1,6 @@
 ﻿import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
+import { BedrockAgentClient, StartIngestionJobCommand } from "@aws-sdk/client-bedrock-agent";
+import { fromIni } from "@aws-sdk/credential-providers";
 import { NextResponse } from "next/server";
 import { createS3Client, createTextractS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
@@ -53,7 +55,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     memo: body.memo || ""
   };
 
-  await createS3Client().send(
+  const s3 = createS3Client();
+  await s3.send(
     new PutObjectCommand({
       Bucket: bucket,
       Key: createMetadataS3Key(appEnv.s3MetadataPrefix, id),
@@ -62,7 +65,48 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     })
   );
 
+  // folderId が変更され、KB文書が存在する場合はサイドカーを更新してKB再同期
+  const folderChanged = body.folderId !== undefined && body.folderId !== current.folderId;
+  if (folderChanged && nextMetadata.knowledgeBaseKey) {
+    try {
+      await s3.send(
+        new PutObjectCommand({
+          Bucket: bucket,
+          Key: `${nextMetadata.knowledgeBaseKey}.metadata.json`,
+          Body: JSON.stringify({ metadataAttributes: { folderId: nextMetadata.folderId || "__none__" } }),
+          ContentType: "application/json; charset=utf-8"
+        })
+      );
+      await triggerKbResync();
+    } catch (err) {
+      console.error("[files PUT] folderId sidecar/resync failed:", err);
+    }
+  }
+
   return NextResponse.json({ file: nextMetadata });
+}
+
+async function triggerKbResync() {
+  const kbId = appEnv.bedrockKnowledgeBaseId;
+  const dsId = appEnv.bedrockDataSourceId;
+  if (!kbId || !dsId) return;
+  const credentials = appEnv.awsProfile ? fromIni({ profile: appEnv.awsProfile }) : undefined;
+  const client = new BedrockAgentClient({
+    region: appEnv.awsRegion,
+    ...(credentials ? { credentials } : {}),
+  });
+  try {
+    await client.send(new StartIngestionJobCommand({
+      knowledgeBaseId: kbId,
+      dataSourceId: dsId,
+      description: "folderId change resync",
+    }));
+  } catch (err) {
+    // ConflictException（既存ジョブ実行中）は無視。次回ジョブが拾う
+    if (!(err instanceof Error) || !err.message.includes("ConflictException")) {
+      console.error("[files PUT] StartIngestionJob failed:", err);
+    }
+  }
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
