@@ -1276,6 +1276,68 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     }
   }
 
+  async function saveToGoogleDocs() {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    if (!clientId || !content || !generatedTheme) return;
+    setNotice("Google ドキュメントに保存中…");
+    try {
+      // 1. .docx を生成
+      const res = await fetch("/api/generate-manual/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content, theme: generatedTheme, images: getEmbeddedImages() })
+      });
+      if (!res.ok) throw new Error(`docx 生成エラー ${res.status}`);
+      const blob = await res.blob();
+
+      // 2. GIS スクリプトをロード
+      if (!document.querySelector('script[src="https://accounts.google.com/gsi/client"]')) {
+        await new Promise<void>((resolve, reject) => {
+          const s = document.createElement("script");
+          s.src = "https://accounts.google.com/gsi/client";
+          s.onload = () => resolve();
+          s.onerror = () => reject(new Error("GIS スクリプトの読み込みに失敗しました"));
+          document.head.appendChild(s);
+        });
+      }
+
+      // 3. OAuth トークン取得（drive.file スコープ）
+      const token = await new Promise<string>((resolve, reject) => {
+        const client = google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: (resp) => {
+            if (resp.access_token) resolve(resp.access_token);
+            else reject(new Error("Google 認証に失敗しました"));
+          },
+        });
+        client.requestAccessToken({ prompt: "" });
+      });
+
+      // 4. Drive にアップロード（.docx → Google ドキュメントに自動変換）
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify({
+        name: generatedTheme,
+        mimeType: "application/vnd.google-apps.document",
+      })], { type: "application/json" }));
+      form.append("file", blob);
+
+      const uploadRes = await fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
+      );
+      if (!uploadRes.ok) throw new Error(`Drive アップロードエラー ${uploadRes.status}`);
+      const data = (await uploadRes.json()) as { id: string };
+
+      // 5. 新タブで開く
+      window.open(`https://docs.google.com/document/d/${data.id}/edit`, "_blank");
+      setNotice("✓ Google ドキュメントに保存しました");
+      window.setTimeout(() => setNotice(n => n === "✓ Google ドキュメントに保存しました" ? "" : n), 3000);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Google ドキュメントへの保存に失敗しました");
+    }
+  }
+
   async function generateSlidesFromContent() {
     if (!content || !generatedTheme || loading) return;
 
@@ -1823,6 +1885,11 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
                 <Button variant="secondary" onClick={downloadDocx} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
                   <Download size={13} aria-hidden="true" />Word (.docx)
                 </Button>
+                {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ? (
+                  <Button variant="secondary" onClick={saveToGoogleDocs} style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}>
+                    <ExternalLink size={13} aria-hidden="true" />Google ドキュメント
+                  </Button>
+                ) : null}
               </>
             ) : null}
             {!loading && generatedOutputType === "slide" && slidesHtml.length > 0 ? (
