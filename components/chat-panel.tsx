@@ -89,15 +89,17 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
     } catch {}
     fetch("/api/files", { cache: "no-store" })
       .then(r => r.json())
-      .then((data: { files: { id: string; folderId?: string; knowledgeBaseKey?: string }[] }) => {
+      .then((data: { files: { id: string; folderId?: string; knowledgeBaseKey?: string; ragSyncStatus?: string }[] }) => {
         const assignments: Record<string, string | null> = (() => {
           try { return JSON.parse(localStorage.getItem("dental-repo-assignments-v2") ?? "{}"); } catch { return {}; }
         })();
-        setFileList((data.files ?? []).map(f => ({
-          id: f.id,
-          folderId: assignments[f.id] ?? f.folderId ?? "",
-          knowledgeBaseKey: f.knowledgeBaseKey ?? "",
-        })));
+        setFileList((data.files ?? [])
+          .filter(f => f.ragSyncStatus === "completed")
+          .map(f => ({
+            id: f.id,
+            folderId: assignments[f.id] ?? f.folderId ?? "",
+            knowledgeBaseKey: f.knowledgeBaseKey ?? "",
+          })));
       })
       .catch(() => {});
   }, []);

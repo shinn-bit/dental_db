@@ -166,11 +166,6 @@ export async function POST(request: Request) {
     .filter(Boolean)
     .map(k => `s3://${appEnv.s3BucketName}/${k}`);
   const retrievalFilter = createSourceUriFilter([...sourceUris, ...folderUris]);
-  if (folderUris.length > 0) {
-    console.log("[chat/folder-filter] folderUris:", JSON.stringify(folderUris));
-    console.log("[chat/folder-filter] filter:", JSON.stringify(retrievalFilter));
-  }
-
   const queryText = `${message}${attachmentContext}`;
 
   try {
@@ -179,19 +174,6 @@ export async function POST(request: Request) {
     // 回答生成と文書検索を並列実行
     // RetrieveAndGenerateはカスタムpromptTemplate使用時にretrievedReferencesを返さないため
     // RetrieveCommandで別途ソース文書を取得して画像引き出しに使う
-    // フィルタ有の場合、フィルタなしでも並列検索して結果URIを確認
-    const debugRetrieve = folderUris.length > 0
-      ? bedrockClient.send(new RetrieveCommand({
-          knowledgeBaseId,
-          retrievalQuery: { text: queryText },
-          retrievalConfiguration: { vectorSearchConfiguration: { numberOfResults: 3 } },
-        })).then(r => {
-          const uris = (r.retrievalResults ?? []).map(x => x.location?.s3Location?.uri ?? "");
-          console.log("[chat/folder-filter] Bedrock actual URIs (no filter):", JSON.stringify(uris));
-        }).catch(() => {})
-      : Promise.resolve();
-
-    void debugRetrieve;
     const [response, retrieveResponse] = await Promise.all([
       bedrockClient.send(new RetrieveAndGenerateCommand({
         ...(body.bedrockSessionId ? { sessionId: body.bedrockSessionId } : {}),
@@ -245,8 +227,13 @@ export async function POST(request: Request) {
       : [];
     console.log(`[chat/images] result: ${images.length} images`);
 
+    // フォルダフィルタ適用かつ検索結果0件の場合は分かりやすいメッセージに差し替え
+    const answerText = retrievalResults.length === 0 && folderUris.length > 0
+      ? "選択したフォルダの資料には、ご質問に関連する内容が見つかりませんでした。「すべての資料」に切り替えてもう一度お試しください。"
+      : response.output?.text || "";
+
     return NextResponse.json({
-      answer: response.output?.text || "",
+      answer: answerText,
       citations: response.citations || [],
       bedrockSessionId: response.sessionId || "",
       images,
