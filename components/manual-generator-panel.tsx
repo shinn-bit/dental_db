@@ -1342,15 +1342,19 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       };
       if (folderId) metadata.parents = [folderId];
 
+      const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
       const form = new FormData();
       form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-      form.append("file", blob);
+      form.append("file", new Blob([await blob.arrayBuffer()], { type: docxMime }), `${generatedTheme}.docx`);
 
       const uploadRes = await fetch(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
         { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
       );
-      if (!uploadRes.ok) throw new Error(`Drive アップロードエラー ${uploadRes.status}`);
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error(`Drive アップロードエラー ${uploadRes.status}: ${errText}`);
+      }
       const data2 = (await uploadRes.json()) as { id: string };
 
       // 6. 新タブで開く
@@ -1525,15 +1529,19 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       };
       if (folderId) metadata.parents = [folderId];
 
+      const pptxMime = "application/vnd.openxmlformats-officedocument.presentationml.presentation";
       const form = new FormData();
       form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-      form.append("file", blob);
+      form.append("file", new Blob([await blob.arrayBuffer()], { type: pptxMime }), `${generatedTheme}.pptx`);
 
       const uploadRes = await fetch(
         "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
         { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
       );
-      if (!uploadRes.ok) throw new Error(`Drive アップロードエラー ${uploadRes.status}`);
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error(`Drive アップロードエラー ${uploadRes.status}: ${errText}`);
+      }
       const data = (await uploadRes.json()) as { id: string };
 
       // 6. 新タブで開く
