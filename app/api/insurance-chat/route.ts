@@ -128,8 +128,8 @@ export async function POST(request: Request) {
   const folderUris = (body.folderKeys ?? []).filter(Boolean).map(k => `s3://${appEnv.s3BucketName}/${k}`);
   const retrievalFilter = folderUris.length > 0
     ? folderUris.length === 1
-      ? { equals: { key: "x-amz-bedrock-kb-source-uri", value: { stringValue: folderUris[0] } } }
-      : { orAll: folderUris.map(uri => ({ equals: { key: "x-amz-bedrock-kb-source-uri", value: { stringValue: uri } } })) }
+      ? { equals: { key: "x-amz-bedrock-kb-source-uri", value: folderUris[0] } }
+      : { orAll: folderUris.map(uri => ({ equals: { key: "x-amz-bedrock-kb-source-uri", value: uri } })) }
     : undefined;
 
   try {
