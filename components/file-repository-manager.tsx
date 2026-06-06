@@ -254,7 +254,7 @@ export function FileRepositoryManager() {
     const isSyncing = files.some(f => f.ragSyncStatus === "syncing");
 
     // 全ファイルの処理完了後、同期待ちがあればKB同期をトリガー
-    if (preparingCount === 0 && needsSync && !isSyncing && !kbSyncLoading) {
+    if (needsSync && !isSyncing && !kbSyncLoading) {
       triggerKbSync();
     }
 
