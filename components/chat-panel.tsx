@@ -74,7 +74,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
     fetch("/api/chat-sessions")
       .then((r) => r.json())
       .then((data: { sessions: SessionSummary[] }) =>
-        setSessions((data.sessions ?? []).filter(s => s.type !== "insurance"))
+        setSessions((data.sessions ?? []).filter(s => !s.type || s.type === "chat"))
       )
       .catch(() => {});
   }, []);

@@ -512,11 +512,10 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRepoItemId, onLoadChatSession }: {
+export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRepoItemId }: {
   onSwitchMode?: () => void;
   initialSessionId?: string | null;
   initialRepoItemId?: string | null;
-  onLoadChatSession?: (id: string) => void;
 }) {
   const [messages, setMessages] = useState<ManualMessage[]>([]);
   const [input, setInput] = useState("");
@@ -595,7 +594,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     fetch("/api/chat-sessions")
       .then(r => r.json())
       .then((data: { sessions: SessionSummary[] }) => {
-        setSessions((data.sessions ?? []).filter(s => s.type !== "insurance"));
+        setSessions((data.sessions ?? []).filter(
+          s => s.type === "manual" || s.type === "slide" || s.type === "document"
+        ));
       })
       .catch(() => {});
   }, []);
@@ -1621,10 +1622,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
                   ) : (
                     <div
                       style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 4px 6px 8px", borderRadius: 6, background: currentSessionId === session.id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer" }}
-                      onClick={() => {
-                        if (session.type === "manual") loadSessionById(session.id);
-                        else onLoadChatSession?.(session.id);
-                      }}
+                      onClick={() => loadSessionById(session.id)}
                     >
                       {session.type === "slide" ? (
                         <LayoutTemplate size={12} style={{ flexShrink: 0, color: "#4a90d9" }} aria-hidden="true" />

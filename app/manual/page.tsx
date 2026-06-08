@@ -16,7 +16,6 @@ function ManualContent() {
         onSwitchMode={() => router.push("/")}
         initialSessionId={sessionId}
         initialRepoItemId={repoItemId}
-        onLoadChatSession={(id) => router.push(`/?sessionId=${id}`)}
       />
     </div>
   );
