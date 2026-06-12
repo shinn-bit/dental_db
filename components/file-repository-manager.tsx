@@ -843,8 +843,10 @@ function FolderContentView({
   const isEmpty = subFolders.length === 0 && files.length === 0 && !isLoadingFiles;
 
   function folderFileCount(fid: string): number {
-    return Object.values(assignments).filter(v => v === fid).length
-      + allFolders.filter(f => f.parentId === fid).length;
+    // フォルダ自身とその全サブフォルダに含まれる書類数を数える。
+    // サブフォルダの「数」を件数に加算しない（書類数とフォルダ数の二重カウント防止）。
+    const subtree = collectDescendants(allFolders, fid);
+    return Object.values(assignments).filter(v => v != null && subtree.has(v)).length;
   }
 
   return (
