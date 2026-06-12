@@ -27,6 +27,7 @@ type RepositoryFile = {
   ragSyncStatus: StoredFileMetadata["ragSyncStatus"];
   thumbnailUrl: string | null;
   textExtractionStatus: StoredFileMetadata["textExtractionStatus"];
+  folderId: string | null;
   imageCount: number;
   imageProcessingStatus: StoredFileMetadata["imageProcessingStatus"];
   imageProcessingError: string;
@@ -225,7 +226,18 @@ export function FileRepositoryManager() {
       const res = await fetch("/api/files", { cache: "no-store" });
       if (!res.ok) throw new Error("S3一覧を読み込めませんでした。");
       const data = (await res.json()) as { files: Array<StoredFileMetadata & { thumbnailUrl?: string | null }> };
-      setFiles(data.files.map(toRepositoryFile));
+      const repoFiles = data.files.map(toRepositoryFile);
+      setFiles(repoFiles);
+      // フォルダ所属はS3メタデータ(folderId)を正とし、localStorageのassignmentsを
+      // 実在ファイルへ同期する。存在しないファイルの古いエントリを除去し、件数の
+      // 二重カウントを防ぐ。S3にfolderIdが無いレガシーファイルはlocalStorageを尊重。
+      setAssignments(prev => {
+        const next: FileAssignments = {};
+        for (const f of repoFiles) {
+          next[f.id] = f.folderId ?? prev[f.id] ?? null;
+        }
+        return next;
+      });
     } catch (error) {
       if (opts.updateNotice !== false) setNotice(error instanceof Error ? error.message : "S3一覧を読み込めませんでした。");
     } finally {
@@ -1447,6 +1459,7 @@ function toRepositoryFile(m: StoredFileMetadata & { thumbnailUrl?: string | null
     ragSyncStatus: m.ragSyncStatus || "not_started",
     thumbnailUrl: m.thumbnailUrl ?? null,
     textExtractionStatus: m.textExtractionStatus || "not_started",
+    folderId: m.folderId ? m.folderId : null,
     imageCount: m.images?.length ?? 0,
     imageProcessingStatus: m.imageProcessingStatus,
     imageProcessingError: m.imageProcessingError || "",
