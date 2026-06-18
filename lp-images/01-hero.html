@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    font-family: 'Noto Sans JP', sans-serif;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .wrapper {
+    width: 1200px;
+    height: 630px;
+    display: flex;
+    position: relative;
+    background: linear-gradient(135deg, #f0f6ff 0%, #ffffff 60%);
+  }
+
+  /* 背景装飾 */
+  .bg-circle-1 {
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #dbeafe 0%, transparent 70%);
+    top: -150px; right: -100px;
+    z-index: 0;
+  }
+  .bg-circle-2 {
+    position: absolute;
+    width: 300px; height: 300px;
+    border-radius: 50%;
+    background: radial-gradient(circle, #e0f2fe 0%, transparent 70%);
+    bottom: -80px; left: 300px;
+    z-index: 0;
+  }
+
+  /* 左：テキスト */
+  .left {
+    width: 520px;
+    padding: 70px 0 70px 72px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    position: relative;
+    z-index: 1;
+  }
+
+  .badge {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 4px 14px;
+    border-radius: 20px;
+    margin-bottom: 24px;
+    letter-spacing: 0.05em;
+    width: fit-content;
+  }
+
+  .headline {
+    font-size: 40px;
+    font-weight: 900;
+    line-height: 1.35;
+    color: #0f172a;
+    margin-bottom: 24px;
+    letter-spacing: -0.01em;
+  }
+
+  .headline .accent {
+    color: #2563eb;
+  }
+
+  .sub {
+    font-size: 16px;
+    color: #475569;
+    line-height: 1.75;
+    margin-bottom: 40px;
+  }
+
+  .cta {
+    display: inline-block;
+    background: #2563eb;
+    color: #fff;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 14px 36px;
+    border-radius: 8px;
+    width: fit-content;
+    letter-spacing: 0.03em;
+  }
+
+  /* 右：PC モックアップ */
+  .right {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    z-index: 1;
+    padding-right: 48px;
+  }
+
+  .laptop {
+    width: 520px;
+    filter: drop-shadow(0 20px 40px rgba(37,99,235,0.18));
+  }
+
+  .laptop-body {
+    background: #1e293b;
+    border-radius: 12px 12px 0 0;
+    padding: 12px;
+    position: relative;
+  }
+
+  .laptop-screen {
+    background: #f8fafc;
+    border-radius: 6px;
+    overflow: hidden;
+    height: 290px;
+  }
+
+  /* チャットUI */
+  .screen-header {
+    background: #1e3a5f;
+    padding: 10px 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .screen-header .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .screen-header .dot.r { background: #ef4444; }
+  .screen-header .dot.y { background: #f59e0b; }
+  .screen-header .dot.g { background: #22c55e; }
+  .screen-title { color: #93c5fd; font-size: 12px; font-weight: 700; margin-left: 8px; }
+
+  .chat-area {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .msg {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+
+  .msg.user { flex-direction: row-reverse; }
+
+  .avatar {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: #2563eb;
+    display: flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 11px; font-weight: 700;
+    flex-shrink: 0;
+  }
+  .avatar.ai { background: #0f172a; }
+
+  .bubble {
+    max-width: 320px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #1e293b;
+    background: #e2e8f0;
+  }
+  .bubble.user { background: #1e3a5f; color: #fff; border-radius: 12px 2px 12px 12px; }
+  .bubble.ai { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 2px 12px 12px 12px; }
+
+  .source-tag {
+    display: inline-block;
+    background: #dbeafe;
+    color: #1d4ed8;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+    font-weight: 700;
+  }
+
+  .laptop-base {
+    background: #334155;
+    height: 14px;
+    border-radius: 0 0 4px 4px;
+  }
+  .laptop-stand {
+    background: #475569;
+    height: 8px;
+    width: 140px;
+    margin: 0 auto;
+    border-radius: 0 0 8px 8px;
+  }
+  .laptop-foot {
+    background: #64748b;
+    height: 4px;
+    width: 200px;
+    margin: 0 auto;
+    border-radius: 4px;
+  }
+
+  /* フローティングバッジ */
+  .float-badge {
+    position: absolute;
+    background: #fff;
+    border-radius: 12px;
+    padding: 10px 16px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .float-badge .icon { font-size: 18px; }
+  .float-badge.b1 { bottom: 90px; left: -20px; }
+  .float-badge.b2 { top: 60px; right: 30px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="bg-circle-1"></div>
+  <div class="bg-circle-2"></div>
+
+  <div class="left">
+    <div class="badge">歯科医院向け 院内ナレッジ管理</div>
+    <h1 class="headline">
+      あなたの医院の資料が、<br>
+      <span class="accent">そのままAIになる。</span>
+    </h1>
+    <p class="sub">
+      スタッフの質問に、院内資料から即座に回答。<br>
+      アップロードするだけで、医院専用AIアシスタントが完成します。
+    </p>
+    <div class="cta">無料で試してみる →</div>
+  </div>
+
+  <div class="right">
+    <div style="position:relative;">
+      <div class="laptop">
+        <div class="laptop-body">
+          <div class="laptop-screen">
+            <div class="screen-header">
+              <div class="dot r"></div>
+              <div class="dot y"></div>
+              <div class="dot g"></div>
+              <div class="screen-title">院内ナレッジ — AIチャット</div>
+            </div>
+            <div class="chat-area">
+              <div class="msg user">
+                <div class="avatar">私</div>
+                <div class="bubble user">根管治療後の痛みが続く場合の対応を教えて</div>
+              </div>
+              <div class="msg">
+                <div class="avatar ai">知</div>
+                <div class="bubble ai">
+                  根管治療後の疼痛が72時間以上継続する場合は、まず排膿路の確認を行います。院内プロトコルでは①咬合調整②消炎鎮痛剤の処方③必要に応じて再根管処置の順で対応します。
+                  <div><span class="source-tag">📄 根管治療マニュアル.pdf を参照</span></div>
+                </div>
+              </div>
+              <div class="msg user">
+                <div class="avatar">私</div>
+                <div class="bubble user">処方する薬の用量は？</div>
+              </div>
+            </div>
+          </div>
+          <div class="laptop-base"></div>
+        </div>
+        <div class="laptop-stand"></div>
+        <div class="laptop-foot"></div>
+      </div>
+
+      <div class="float-badge b1">
+        <span class="icon">📄</span>
+        <span>院内資料から<br><strong style="color:#2563eb">自動で回答</strong></span>
+      </div>
+      <div class="float-badge b2">
+        <span class="icon">✅</span>
+        <span><strong style="color:#16a34a">RAG同期済み</strong><br>32件の資料</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
