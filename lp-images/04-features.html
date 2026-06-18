@@ -40,16 +40,10 @@
   }
 
   .top { text-align: center; z-index: 1; }
-  .top-label {
-    font-size: 13px; font-weight: 700;
-    color: #2563eb; letter-spacing: 0.1em; margin-bottom: 10px;
-  }
-  .headline {
-    font-size: 36px; font-weight: 900; color: #0f172a;
-  }
+  .top-label { font-size: 13px; font-weight: 700; color: #2563eb; letter-spacing: 0.1em; margin-bottom: 10px; }
+  .headline { font-size: 36px; font-weight: 900; color: #0f172a; }
   .headline .accent { color: #2563eb; }
 
-  /* 2カラム */
   .cols {
     display: flex;
     gap: 28px;
@@ -67,7 +61,7 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 20px;
+    gap: 18px;
     box-shadow: 0 4px 24px rgba(0,0,0,0.06);
     text-align: center;
   }
@@ -81,15 +75,10 @@
   .col-icon-wrap.blue  { background: #dbeafe; }
   .col-icon-wrap.green { background: #dcfce7; }
 
-  .col-title {
-    font-size: 22px; font-weight: 900; color: #0f172a;
-  }
+  .col-title { font-size: 22px; font-weight: 900; color: #0f172a; }
+  .col-desc  { font-size: 15px; color: #475569; line-height: 1.7; }
 
-  .col-desc {
-    font-size: 15px; color: #475569; line-height: 1.7;
-  }
-
-  /* チャットミニUI */
+  /* チャットプレビュー */
   .chat-preview {
     background: #f8faff;
     border-radius: 14px;
@@ -112,19 +101,18 @@
   }
   .bubble.q { background: #1e3a5f; color: #fff; border-radius: 14px 4px 14px 14px; }
   .bubble.a { background: #fff; color: #1e293b; border: 1.5px solid #e2e8f0; border-radius: 4px 14px 14px 14px; }
-
   .src { font-size: 11px; color: #2563eb; font-weight: 700; margin-top: 4px; }
 
-  /* マニュアルミニUI */
-  .manual-preview {
+  /* スライド・Word生成プレビュー */
+  .create-preview {
     background: #f0fdf4;
     border-radius: 14px;
-    padding: 16px 20px;
+    padding: 18px 20px;
     width: 100%;
+    border: 1.5px solid #bbf7d0;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    border: 1.5px solid #bbf7d0;
+    gap: 14px;
   }
 
   .input-row {
@@ -143,23 +131,59 @@
     white-space: nowrap;
   }
 
-  .output-label {
-    font-size: 13px; font-weight: 700; color: #166534;
-    display: flex; align-items: center; gap: 6px;
+  /* 出力結果2種 */
+  .output-row {
+    display: flex;
+    gap: 10px;
   }
 
-  .lines { display: flex; flex-direction: column; gap: 6px; }
-  .line {
-    height: 9px; background: #bbf7d0; border-radius: 5px;
+  .output-card {
+    flex: 1;
+    background: #fff;
+    border-radius: 10px;
+    border: 1.5px solid #bbf7d0;
+    padding: 12px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
   }
 
-  .badges {
-    display: flex; gap: 8px; margin-top: 2px;
+  .output-title {
+    font-size: 13px; font-weight: 900; color: #166534;
+    display: flex; align-items: center; gap: 5px;
   }
-  .badge {
-    background: #fff; border: 1.5px solid #bbf7d0;
-    border-radius: 20px; padding: 5px 12px;
-    font-size: 12px; font-weight: 700; color: #166534;
+
+  /* スライドサムネイル風 */
+  .slide-thumb {
+    background: #1e3a5f;
+    border-radius: 6px;
+    height: 54px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 8px 10px;
+    gap: 5px;
+  }
+  .slide-line { height: 6px; background: rgba(255,255,255,0.4); border-radius: 3px; }
+  .slide-line.title { background: rgba(255,255,255,0.9); }
+
+  /* Wordサムネイル風 */
+  .word-thumb {
+    background: #fff;
+    border: 1px solid #d1fae5;
+    border-radius: 6px;
+    height: 54px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 8px 10px;
+    gap: 5px;
+  }
+  .word-line { height: 5px; background: #e2e8f0; border-radius: 3px; }
+  .word-line.bold { background: #166534; }
+
+  .page-count {
+    font-size: 11px; font-weight: 700; color: #16a34a;
   }
 </style>
 </head>
@@ -175,7 +199,7 @@
 
   <div class="cols">
 
-    <!-- チャット -->
+    <!-- チャット検索 -->
     <div class="col">
       <div class="col-icon-wrap blue">💬</div>
       <div class="col-title">チャットで即検索</div>
@@ -193,26 +217,36 @@
       </div>
     </div>
 
-    <!-- マニュアル生成 -->
+    <!-- スライド・Word生成 -->
     <div class="col">
-      <div class="col-icon-wrap green">📝</div>
-      <div class="col-title">マニュアル自動生成</div>
-      <div class="col-desc">病名や手順を入力するだけで<br>Word・スライドが完成</div>
-      <div class="manual-preview">
+      <div class="col-icon-wrap green">✨</div>
+      <div class="col-title">スライド・Word自動作成</div>
+      <div class="col-desc">テーマを入れるだけで<br>スライドもWordも一瞬で完成</div>
+      <div class="create-preview">
         <div class="input-row">
           <div class="fake-input">歯周病の基礎と治療の流れ</div>
-          <div class="gen-btn">✨ 生成</div>
+          <div class="gen-btn">✨ 作成</div>
         </div>
-        <div class="output-label">✅ 生成完了</div>
-        <div class="lines">
-          <div class="line" style="width:100%"></div>
-          <div class="line" style="width:85%"></div>
-          <div class="line" style="width:92%"></div>
-          <div class="line" style="width:75%"></div>
-        </div>
-        <div class="badges">
-          <div class="badge">📄 Word出力</div>
-          <div class="badge">🎯 スライド12枚</div>
+        <div class="output-row">
+          <div class="output-card">
+            <div class="output-title">🎯 スライド</div>
+            <div class="slide-thumb">
+              <div class="slide-line title" style="width:70%"></div>
+              <div class="slide-line" style="width:90%"></div>
+              <div class="slide-line" style="width:60%"></div>
+            </div>
+            <div class="page-count">✅ 12枚 自動生成</div>
+          </div>
+          <div class="output-card">
+            <div class="output-title">📄 Word</div>
+            <div class="word-thumb">
+              <div class="word-line bold" style="width:65%"></div>
+              <div class="word-line" style="width:100%"></div>
+              <div class="word-line" style="width:85%"></div>
+              <div class="word-line" style="width:90%"></div>
+            </div>
+            <div class="page-count">✅ .docx ダウンロード</div>
+          </div>
         </div>
       </div>
     </div>
