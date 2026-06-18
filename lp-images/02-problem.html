@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    font-family: 'Noto Sans JP', sans-serif;
+    background: #ffffff;
+    overflow: hidden;
+  }
+
+  .wrapper {
+    width: 1200px;
+    height: 630px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(160deg, #f8faff 0%, #ffffff 100%);
+    position: relative;
+    padding: 48px 72px;
+  }
+
+  .bg-blob {
+    position: absolute;
+    border-radius: 50%;
+    z-index: 0;
+  }
+  .bg-blob.b1 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, #eff6ff 0%, transparent 70%);
+    top: -100px; right: -80px;
+  }
+  .bg-blob.b2 {
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, #fef3c7 0%, transparent 70%);
+    bottom: -60px; left: -60px;
+  }
+
+  .top-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #2563eb;
+    letter-spacing: 0.08em;
+    margin-bottom: 12px;
+    z-index: 1;
+  }
+
+  .headline {
+    font-size: 36px;
+    font-weight: 900;
+    color: #0f172a;
+    text-align: center;
+    line-height: 1.4;
+    margin-bottom: 48px;
+    z-index: 1;
+  }
+
+  .headline .underline {
+    border-bottom: 4px solid #2563eb;
+    padding-bottom: 2px;
+  }
+
+  /* Before / After カード */
+  .cards {
+    display: flex;
+    gap: 0;
+    width: 100%;
+    z-index: 1;
+    align-items: stretch;
+  }
+
+  .arrow-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 16px;
+    flex-shrink: 0;
+  }
+
+  .arrow {
+    width: 48px;
+    height: 48px;
+    background: #2563eb;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 22px;
+    box-shadow: 0 4px 16px rgba(37,99,235,0.3);
+  }
+
+  .card {
+    flex: 1;
+    border-radius: 16px;
+    padding: 28px 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .card.before {
+    background: #fff7ed;
+    border: 2px solid #fed7aa;
+  }
+
+  .card.after {
+    background: #eff6ff;
+    border: 2px solid #bfdbfe;
+  }
+
+  .card-label {
+    font-size: 12px;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    padding: 4px 12px;
+    border-radius: 20px;
+    width: fit-content;
+  }
+  .before .card-label { background: #f97316; color: #fff; }
+  .after  .card-label { background: #2563eb; color: #fff; }
+
+  .card-title {
+    font-size: 20px;
+    font-weight: 900;
+    line-height: 1.4;
+  }
+  .before .card-title { color: #9a3412; }
+  .after  .card-title { color: #1e40af; }
+
+  .item-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    font-size: 14px;
+    color: #374151;
+    line-height: 1.5;
+  }
+
+  .item-icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="bg-blob b1"></div>
+  <div class="bg-blob b2"></div>
+
+  <div class="top-label">こんな悩み、ありませんか？</div>
+  <h2 class="headline">
+    スタッフの時間が、<span class="underline">「探す・聞く・教える」</span>で消えていく。
+  </h2>
+
+  <div class="cards">
+    <!-- BEFORE -->
+    <div class="card before">
+      <div class="card-label">BEFORE</div>
+      <div class="card-title">院内ナレッジ管理の<br>よくある課題</div>
+      <div class="item-list">
+        <div class="item">
+          <span class="item-icon">😓</span>
+          <span>新人が同じ質問を何度もしてくる。そのたびに先輩が手を止める</span>
+        </div>
+        <div class="item">
+          <span class="item-icon">📁</span>
+          <span>マニュアルがどこにあるかわからず、結局口頭で教えている</span>
+        </div>
+        <div class="item">
+          <span class="item-icon">😰</span>
+          <span>引き継ぎのたびに資料を探し回り、抜け漏れが不安</span>
+        </div>
+        <div class="item">
+          <span class="item-icon">📝</span>
+          <span>マニュアルを作りたいけど、時間がなくて後回しになり続ける</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow-wrap">
+      <div class="arrow">→</div>
+    </div>
+
+    <!-- AFTER -->
+    <div class="card after">
+      <div class="card-label">AFTER</div>
+      <div class="card-title">院内ナレッジ導入後の<br>スタッフの一日</div>
+      <div class="item-list">
+        <div class="item">
+          <span class="item-icon">💬</span>
+          <span>わからないことはAIに聞くだけ。院内資料から即座に答えが出る</span>
+        </div>
+        <div class="item">
+          <span class="item-icon">🔍</span>
+          <span>資料はチャットで検索。「根管治療 痛み 対応」と打つだけで見つかる</span>
+        </div>
+        <div class="item">
+          <span class="item-icon">✅</span>
+          <span>引き継ぎも安心。過去の対応履歴や手順書がすぐ確認できる</span>
+        </div>
+        <div class="item">
+          <span class="item-icon">📄</span>
+          <span>マニュアルはAIが自動生成。病名を入れるだけで完成する</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
