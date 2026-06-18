@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    font-family: 'Noto Sans JP', sans-serif;
+    overflow: hidden;
+  }
+
+  .wrapper {
+    width: 1200px;
+    height: 630px;
+    background: linear-gradient(160deg, #f0f6ff 0%, #ffffff 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 72px 44px;
+    gap: 36px;
+    position: relative;
+  }
+
+  .bg-blob { position: absolute; border-radius: 50%; z-index: 0; }
+  .bg-blob.b1 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, #dbeafe 0%, transparent 70%);
+    top: -100px; right: -80px;
+  }
+  .bg-blob.b2 {
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, #dcfce7 0%, transparent 70%);
+    bottom: -80px; left: -40px;
+  }
+
+  .top { text-align: center; z-index: 1; }
+  .top-label {
+    font-size: 13px; font-weight: 700;
+    color: #2563eb; letter-spacing: 0.1em; margin-bottom: 10px;
+  }
+  .headline {
+    font-size: 36px; font-weight: 900; color: #0f172a;
+  }
+  .headline .accent { color: #2563eb; }
+
+  /* 2カラム */
+  .cols {
+    display: flex;
+    gap: 28px;
+    width: 100%;
+    z-index: 1;
+    flex: 1;
+  }
+
+  .col {
+    flex: 1;
+    background: #ffffff;
+    border-radius: 24px;
+    border: 2px solid #e2e8f0;
+    padding: 32px 32px 28px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    text-align: center;
+  }
+
+  .col-icon-wrap {
+    width: 64px; height: 64px;
+    border-radius: 20px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 32px;
+  }
+  .col-icon-wrap.blue  { background: #dbeafe; }
+  .col-icon-wrap.green { background: #dcfce7; }
+
+  .col-title {
+    font-size: 22px; font-weight: 900; color: #0f172a;
+  }
+
+  .col-desc {
+    font-size: 15px; color: #475569; line-height: 1.7;
+  }
+
+  /* チャットミニUI */
+  .chat-preview {
+    background: #f8faff;
+    border-radius: 14px;
+    padding: 16px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .bubble-row { display: flex; gap: 8px; align-items: flex-end; }
+  .bubble-row.right { flex-direction: row-reverse; }
+
+  .bubble {
+    padding: 10px 14px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.6;
+    max-width: 280px;
+  }
+  .bubble.q { background: #1e3a5f; color: #fff; border-radius: 14px 4px 14px 14px; }
+  .bubble.a { background: #fff; color: #1e293b; border: 1.5px solid #e2e8f0; border-radius: 4px 14px 14px 14px; }
+
+  .src { font-size: 11px; color: #2563eb; font-weight: 700; margin-top: 4px; }
+
+  /* マニュアルミニUI */
+  .manual-preview {
+    background: #f0fdf4;
+    border-radius: 14px;
+    padding: 16px 20px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    border: 1.5px solid #bbf7d0;
+  }
+
+  .input-row {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .fake-input {
+    flex: 1; background: #fff; border: 1.5px solid #d1fae5;
+    border-radius: 8px; padding: 9px 13px;
+    font-size: 13px; color: #166534;
+    font-family: 'Noto Sans JP', sans-serif;
+  }
+  .gen-btn {
+    background: #16a34a; color: #fff;
+    border-radius: 8px; padding: 9px 16px;
+    font-size: 13px; font-weight: 700;
+    white-space: nowrap;
+  }
+
+  .output-label {
+    font-size: 13px; font-weight: 700; color: #166534;
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .lines { display: flex; flex-direction: column; gap: 6px; }
+  .line {
+    height: 9px; background: #bbf7d0; border-radius: 5px;
+  }
+
+  .badges {
+    display: flex; gap: 8px; margin-top: 2px;
+  }
+  .badge {
+    background: #fff; border: 1.5px solid #bbf7d0;
+    border-radius: 20px; padding: 5px 12px;
+    font-size: 12px; font-weight: 700; color: #166534;
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="bg-blob b1"></div>
+  <div class="bg-blob b2"></div>
+
+  <div class="top">
+    <div class="top-label">FEATURES</div>
+    <h2 class="headline"><span class="accent">聞けば答える。</span>頼めば作る。</h2>
+  </div>
+
+  <div class="cols">
+
+    <!-- チャット -->
+    <div class="col">
+      <div class="col-icon-wrap blue">💬</div>
+      <div class="col-title">チャットで即検索</div>
+      <div class="col-desc">院内資料に基づいて<br>AIがその場で回答します</div>
+      <div class="chat-preview">
+        <div class="bubble-row right">
+          <div class="bubble q">根管治療後の痛みが続く場合は？</div>
+        </div>
+        <div class="bubble-row">
+          <div class="bubble a">
+            咬合調整→消炎鎮痛剤→再処置の順で対応します。
+            <div class="src">📄 根管治療マニュアルより</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- マニュアル生成 -->
+    <div class="col">
+      <div class="col-icon-wrap green">📝</div>
+      <div class="col-title">マニュアル自動生成</div>
+      <div class="col-desc">病名や手順を入力するだけで<br>Word・スライドが完成</div>
+      <div class="manual-preview">
+        <div class="input-row">
+          <div class="fake-input">歯周病の基礎と治療の流れ</div>
+          <div class="gen-btn">✨ 生成</div>
+        </div>
+        <div class="output-label">✅ 生成完了</div>
+        <div class="lines">
+          <div class="line" style="width:100%"></div>
+          <div class="line" style="width:85%"></div>
+          <div class="line" style="width:92%"></div>
+          <div class="line" style="width:75%"></div>
+        </div>
+        <div class="badges">
+          <div class="badge">📄 Word出力</div>
+          <div class="badge">🎯 スライド12枚</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</body>
+</html>
