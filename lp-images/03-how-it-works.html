@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    width: 1200px;
+    height: 630px;
+    font-family: 'Noto Sans JP', sans-serif;
+    overflow: hidden;
+  }
+
+  .wrapper {
+    width: 1200px;
+    height: 630px;
+    background: linear-gradient(160deg, #0f172a 0%, #1e3a5f 100%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 72px;
+    position: relative;
+    gap: 40px;
+  }
+
+  /* 背景装飾 */
+  .bg-glow {
+    position: absolute;
+    border-radius: 50%;
+    z-index: 0;
+  }
+  .bg-glow.g1 {
+    width: 500px; height: 500px;
+    background: radial-gradient(circle, rgba(37,99,235,0.2) 0%, transparent 70%);
+    top: -150px; right: -100px;
+  }
+  .bg-glow.g2 {
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(16,185,129,0.12) 0%, transparent 70%);
+    bottom: -100px; left: -50px;
+  }
+
+  /* 上部テキスト */
+  .top { text-align: center; z-index: 1; }
+
+  .top-label {
+    font-size: 13px;
+    font-weight: 700;
+    color: #60a5fa;
+    letter-spacing: 0.1em;
+    margin-bottom: 10px;
+  }
+
+  .headline {
+    font-size: 34px;
+    font-weight: 900;
+    color: #ffffff;
+    line-height: 1.35;
+  }
+
+  .headline .accent { color: #60a5fa; }
+
+  /* 3ステップ */
+  .steps {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    width: 100%;
+    z-index: 1;
+  }
+
+  .step {
+    flex: 1;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 16px;
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+    backdrop-filter: blur(4px);
+  }
+
+  .step-num {
+    font-size: 11px;
+    font-weight: 900;
+    color: #60a5fa;
+    letter-spacing: 0.12em;
+  }
+
+  .step-icon {
+    font-size: 36px;
+    line-height: 1;
+  }
+
+  .step-title {
+    font-size: 17px;
+    font-weight: 900;
+    color: #ffffff;
+    line-height: 1.4;
+  }
+
+  .step-desc {
+    font-size: 13px;
+    color: #94a3b8;
+    line-height: 1.65;
+  }
+
+  /* ステップ間の矢印 */
+  .step-arrow {
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    flex-shrink: 0;
+    z-index: 1;
+  }
+
+  .arrow-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .arrow-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #3b82f6;
+  }
+
+  .arrow-head {
+    color: #3b82f6;
+    font-size: 24px;
+    line-height: 1;
+  }
+
+  /* 最終ゴール */
+  .goal {
+    z-index: 1;
+    background: linear-gradient(135deg, #2563eb, #0ea5e9);
+    border-radius: 14px;
+    padding: 18px 48px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    box-shadow: 0 8px 32px rgba(37,99,235,0.4);
+  }
+
+  .goal-icon { font-size: 32px; }
+
+  .goal-text {
+    font-size: 20px;
+    font-weight: 900;
+    color: #ffffff;
+    line-height: 1.4;
+  }
+
+  .goal-sub {
+    font-size: 13px;
+    color: rgba(255,255,255,0.8);
+    margin-top: 4px;
+  }
+
+  /* サブ機能タグ */
+  .sub-features {
+    display: flex;
+    gap: 12px;
+    z-index: 1;
+  }
+
+  .sub-tag {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    border-radius: 24px;
+    padding: 7px 18px;
+    font-size: 13px;
+    color: #e2e8f0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .sub-tag .t-icon { font-size: 15px; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+  <div class="bg-glow g1"></div>
+  <div class="bg-glow g2"></div>
+
+  <div class="top">
+    <div class="top-label">HOW IT WORKS</div>
+    <h2 class="headline">
+      資料をアップするだけ。<br>
+      <span class="accent">あなたの医院専用AIが完成する。</span>
+    </h2>
+  </div>
+
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">STEP 01</div>
+      <div class="step-icon">📄</div>
+      <div class="step-title">院内資料を<br>アップロード</div>
+      <div class="step-desc">PDF・Word・画像など<br>形式は問いません。<br>ドラッグ＆ドロップで完了。</div>
+    </div>
+
+    <div class="step-arrow">
+      <div class="arrow-line">
+        <div class="arrow-dot"></div>
+        <div class="arrow-dot"></div>
+        <div class="arrow-head">›</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">STEP 02</div>
+      <div class="step-icon">🤖</div>
+      <div class="step-title">AIが資料を<br>自動で理解</div>
+      <div class="step-desc">OCRでテキストを抽出し、<br>AIが内容を解析・要約。<br>すべて自動で完了します。</div>
+    </div>
+
+    <div class="step-arrow">
+      <div class="arrow-line">
+        <div class="arrow-dot"></div>
+        <div class="arrow-dot"></div>
+        <div class="arrow-head">›</div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">STEP 03</div>
+      <div class="step-icon">✨</div>
+      <div class="step-title">医院専用AIが<br>完成</div>
+      <div class="step-desc">チャットで質問するだけで<br>院内資料から即座に回答。<br>スタッフ全員がすぐ使えます。</div>
+    </div>
+  </div>
+
+  <div class="goal">
+    <div class="goal-icon">🏥</div>
+    <div>
+      <div class="goal-text">あなたの医院の知識が、いつでもどこでも答えてくれる</div>
+      <div class="goal-sub">さらに、マニュアル自動作成・保険請求AIとしても活用できます</div>
+    </div>
+  </div>
+
+  <div class="sub-features">
+    <div class="sub-tag"><span class="t-icon">💬</span> チャットで即検索</div>
+    <div class="sub-tag"><span class="t-icon">📝</span> マニュアル自動生成</div>
+    <div class="sub-tag"><span class="t-icon">🏦</span> 保険請求AI</div>
+    <div class="sub-tag"><span class="t-icon">🔄</span> Google Drive連携</div>
+  </div>
+</div>
+</body>
+</html>
