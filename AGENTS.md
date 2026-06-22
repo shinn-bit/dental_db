@@ -36,16 +36,12 @@ Get-Content -LiteralPath .\仕様書.md -Raw -Encoding UTF8
 ## Python実行
 
 - Pythonスクリプトを実行する場合は、原則としてAnaconda環境のPythonを使用する。
-- この環境では以下のPythonを優先する。
-
-```powershell
-C:\Users\1107s\anaconda3\python.exe
-```
+- この環境ではAnaconda環境のPythonを優先する（`python` コマンドがAnaconda環境を指すよう設定する）。
 
 - 例:
 
 ```powershell
-C:\Users\1107s\anaconda3\python.exe scripts\example.py
+python scripts\example.py
 ```
 
 ## Node.js / npm

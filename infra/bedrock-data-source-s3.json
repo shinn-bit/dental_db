@@ -1,10 +1,10 @@
 {
   "type": "S3",
   "s3Configuration": {
-    "bucketArn": "arn:aws:s3:::dental-manuals-dev-392749559673-apne1",
+    "bucketArn": "arn:aws:s3:::dental-manuals-dev-YOUR_ACCOUNT_ID-apne1",
     "inclusionPrefixes": [
       "kb/"
     ],
-    "bucketOwnerAccountId": "392749559673"
+    "bucketOwnerAccountId": "YOUR_ACCOUNT_ID"
   }
 }

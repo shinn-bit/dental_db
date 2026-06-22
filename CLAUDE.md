@@ -19,7 +19,7 @@ Claude Codeでこのリポジトリを扱うための運用ルール。
 nvm use 24
 node --version
 npm --version
-C:\Users\1107s\anaconda3\python.exe --version
+python --version
 ```
 
 ## AWS操作
@@ -40,35 +40,35 @@ aws sso login --profile dental-dev
 
 ## 主要AWSリソース
 
+リソース名・ARN・IDは `.env.local` の環境変数を参照。`.env.example` にキー一覧あり。
+
 - AWS region: `ap-northeast-1`
 - Textract region: `ap-northeast-2`
-- メインS3 bucket: `dental-manuals-dev-392749559673-apne1`
-- OCR一時S3 bucket: `dental-manuals-ocr-dev-392749559673-apne2`
-- Lambda: `dental-summary-worker-dev`
-- Lambda ARN: `arn:aws:lambda:ap-northeast-1:392749559673:function:dental-summary-worker-dev`
-- Bedrock Knowledge Base ID: `PUQQYKIB70`
-- Bedrock Data Source ID: `ONYVATT73Q`
-- Bedrock model ARN: `arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6`
+- S3バケット名: `S3_BUCKET_NAME` 環境変数を参照
+- Textract用S3バケット名: `APP_TEXTRACT_BUCKET_NAME` 環境変数を参照
+- Bedrock Knowledge Base ID: `BEDROCK_KNOWLEDGE_BASE_ID` 環境変数を参照
+- Bedrock Data Source ID: `BEDROCK_DATA_SOURCE_ID` 環境変数を参照
+- Bedrock model ARN: `BEDROCK_MODEL_ARN` 環境変数を参照
 
 ## 重要な環境変数
 
-`.env.local` またはAmplify環境変数に以下が必要。
+`.env.local` またはAmplify環境変数に以下が必要。`.env.example` をコピーして実値を設定する。
 
 ```env
 AWS_PROFILE=dental-dev
 APP_AWS_REGION=ap-northeast-1
 APP_TEXTRACT_REGION=ap-northeast-2
-S3_BUCKET_NAME=dental-manuals-dev-392749559673-apne1
+S3_BUCKET_NAME=...
 S3_FILE_PREFIX=manuals/
 S3_MANUAL_PREFIX=manuals/
 S3_METADATA_PREFIX=metadata/
-APP_TEXTRACT_BUCKET_NAME=dental-manuals-ocr-dev-392749559673-apne2
-APP_PREPARE_STATE_MACHINE_ARN=arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-prepare-worker-dev
-APP_SUMMARY_STATE_MACHINE_ARN=arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-summary-worker-dev
-PREPARE_QUEUE_URL=https://sqs.ap-northeast-1.amazonaws.com/392749559673/dental-prepare-queue-dev
-BEDROCK_KNOWLEDGE_BASE_ID=PUQQYKIB70
-BEDROCK_DATA_SOURCE_ID=ONYVATT73Q
-BEDROCK_MODEL_ARN=arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6
+APP_TEXTRACT_BUCKET_NAME=...
+APP_PREPARE_STATE_MACHINE_ARN=...
+APP_SUMMARY_STATE_MACHINE_ARN=...
+PREPARE_QUEUE_URL=...
+BEDROCK_KNOWLEDGE_BASE_ID=...
+BEDROCK_DATA_SOURCE_ID=...
+BEDROCK_MODEL_ARN=...
 APP_SHARE_PASSWORD=...
 APP_AUTH_SECRET=...
 ```
@@ -143,10 +143,10 @@ Remove-Item -LiteralPath .\lambda\prepare_consumer.zip -Force
 依存パッケージはLambda Layerで管理する。**handler.pyのみをzipしてデプロイすればよい。**
 パッケージ（google-cloud-documentai、PyMuPDF等）をzipに含めてはいけない。
 
-| Layer ARN | 用途 | アタッチ先 |
+| Layer | 用途 | アタッチ先 |
 |---|---|---|
-| `arn:aws:lambda:ap-northeast-1:392749559673:layer:dental-docai-layer:1` | google-cloud-documentai + pypdf | dental-summary-worker-dev |
-| `arn:aws:lambda:ap-northeast-1:392749559673:layer:dental-pymupdf-layer:1` | PyMuPDF 1.24.5 | dental-image-processor-dev |
+| `dental-docai-layer` | google-cloud-documentai + pypdf | dental-summary-worker-dev |
+| `dental-pymupdf-layer` | PyMuPDF 1.24.5 | dental-image-processor-dev |
 
 Layerのパッケージを更新する場合は `lambda/layers/` 以下を修正して新バージョンを publish する。
 
@@ -189,7 +189,7 @@ Remove-Item -LiteralPath .\lambda\image_processor.zip -Force
 ```powershell
 npm run lint
 npm run build
-C:\Users\1107s\anaconda3\python.exe -m py_compile lambda\summary_worker\handler.py
+python -m py_compile lambda\summary_worker\handler.py
 ```
 
 ## 作業時の注意

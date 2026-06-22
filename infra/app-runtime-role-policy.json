@@ -10,11 +10,11 @@
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/manuals/*",
-        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/metadata/*",
-        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/summaries/*",
-        "arn:aws:s3:::dental-manuals-dev-392749559673-apne1/kb/*",
-        "arn:aws:s3:::dental-manuals-ocr-dev-392749559673-apne2/*"
+        "arn:aws:s3:::dental-manuals-dev-YOUR_ACCOUNT_ID-apne1/manuals/*",
+        "arn:aws:s3:::dental-manuals-dev-YOUR_ACCOUNT_ID-apne1/metadata/*",
+        "arn:aws:s3:::dental-manuals-dev-YOUR_ACCOUNT_ID-apne1/summaries/*",
+        "arn:aws:s3:::dental-manuals-dev-YOUR_ACCOUNT_ID-apne1/kb/*",
+        "arn:aws:s3:::dental-manuals-ocr-dev-YOUR_ACCOUNT_ID-apne2/*"
       ]
     },
     {
@@ -22,15 +22,15 @@
       "Effect": "Allow",
       "Action": "states:StartExecution",
       "Resource": [
-        "arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-summary-worker-dev",
-        "arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-prepare-worker-dev"
+        "arn:aws:states:ap-northeast-1:YOUR_ACCOUNT_ID:stateMachine:dental-summary-worker-dev",
+        "arn:aws:states:ap-northeast-1:YOUR_ACCOUNT_ID:stateMachine:dental-prepare-worker-dev"
       ]
     },
     {
       "Sid": "ListManualMetadata",
       "Effect": "Allow",
       "Action": "s3:ListBucket",
-      "Resource": "arn:aws:s3:::dental-manuals-dev-392749559673-apne1",
+      "Resource": "arn:aws:s3:::dental-manuals-dev-YOUR_ACCOUNT_ID-apne1",
       "Condition": {
         "StringLike": {
           "s3:prefix": [
@@ -58,7 +58,7 @@
       ],
       "Resource": [
         "*",
-        "arn:aws:bedrock:ap-northeast-1:392749559673:knowledge-base/DSRZ1WUOS5"
+        "arn:aws:bedrock:ap-northeast-1:YOUR_ACCOUNT_ID:knowledge-base/YOUR_KNOWLEDGE_BASE_ID"
       ]
     },
     {
@@ -70,7 +70,7 @@
         "bedrock:InvokeModel*"
       ],
       "Resource": [
-        "arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6",
+        "arn:aws:bedrock:ap-northeast-1:YOUR_ACCOUNT_ID:inference-profile/jp.anthropic.claude-sonnet-4-6",
         "arn:aws:bedrock:ap-northeast-1::foundation-model/anthropic.claude-sonnet-4-6",
         "arn:aws:bedrock:ap-northeast-3::foundation-model/anthropic.claude-sonnet-4-6"
       ]
@@ -82,7 +82,7 @@
         "bedrock:GetInferenceProfile"
       ],
       "Resource": [
-        "arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6"
+        "arn:aws:bedrock:ap-northeast-1:YOUR_ACCOUNT_ID:inference-profile/jp.anthropic.claude-sonnet-4-6"
       ]
     },
     {
