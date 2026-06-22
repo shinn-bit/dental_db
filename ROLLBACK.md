@@ -70,7 +70,7 @@ aws lambda delete-function `
 追加したファイルだけ削除したい場合：
 ```powershell
 # images/ プレフィックスのオブジェクトをすべて削除
-aws s3 rm s3://dental-manuals-dev-392749559673-apne1/images/ `
+aws s3 rm s3://$env:S3_BUCKET_NAME/images/ `
   --recursive --profile dental-dev
 ```
 

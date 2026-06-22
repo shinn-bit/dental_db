@@ -9,30 +9,14 @@
 ```powershell
 aws sso login --profile dental-dev
 aws sts get-caller-identity --profile dental-dev
-aws s3 ls s3://dental-manuals-dev-392749559673-apne1/metadata/ --profile dental-dev
+aws s3 ls s3://$env:S3_BUCKET_NAME/metadata/ --profile dental-dev
 ```
 
 ## Amplify / CI / サービス実行
 
 サービス実行環境では `AWS_PROFILE` を設定しない。実行ロール、またはOIDCでAssumeRoleした一時クレデンシャルを環境から渡す。
 
-Amplify Hosting SSRでは、アプリ実行ロールに `infra/app-runtime-role-policy.json` 相当の権限を付与する。環境変数には以下だけを設定する。
-
-```text
-APP_AWS_REGION=ap-northeast-1
-APP_TEXTRACT_REGION=ap-northeast-2
-APP_TEXTRACT_BUCKET_NAME=dental-manuals-ocr-dev-392749559673-apne2
-S3_BUCKET_NAME=dental-manuals-dev-392749559673-apne1
-S3_MANUAL_PREFIX=manuals/
-S3_METADATA_PREFIX=metadata/
-APP_PREPARE_STATE_MACHINE_ARN=arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-prepare-worker-dev
-APP_SUMMARY_STATE_MACHINE_ARN=arn:aws:states:ap-northeast-1:392749559673:stateMachine:dental-summary-worker-dev
-BEDROCK_KNOWLEDGE_BASE_ID=PUQQYKIB70
-BEDROCK_DATA_SOURCE_ID=ONYVATT73Q
-BEDROCK_MODEL_ARN=arn:aws:bedrock:ap-northeast-1:392749559673:inference-profile/jp.anthropic.claude-sonnet-4-6
-APP_SHARE_PASSWORD=...
-APP_AUTH_SECRET=...
-```
+Amplify Hosting SSRでは、アプリ実行ロールに `infra/app-runtime-role-policy.json` 相当の権限を付与する。環境変数には `.env.example` を参照して実値を設定する。
 
 `RetrieveAndGenerate` でチャットするため、Amplify SSR Compute role には `bedrock:RetrieveAndGenerate` と `bedrock:Retrieve` も必要。
 
