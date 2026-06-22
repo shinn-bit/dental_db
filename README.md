@@ -1,5 +1,7 @@
 # 歯科医院向け 院内ナレッジ管理・AIチャットアプリ
 
+[English version → README.en.md](./README.en.md)
+
 歯科医院スタッフが院内資料を一元管理し、AIに質問できるWebアプリです。  
 PDF・Word・画像をアップロードするだけで、自動OCR・AI要約・RAGチャットが利用できます。
 
