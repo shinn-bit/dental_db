@@ -9,11 +9,11 @@ Simply upload PDFs, Word files, or images — automatic OCR, AI summarization, a
 
 | AI Chat | AI Summary |
 |---|---|
-| ![AI Chat](./screenshots/chat.png) | ![AI Summary](./screenshots/summary.png) |
+| ![AI Chat](./screenshot/chat.png) | ![AI Summary](./screenshot/summary.png) |
 
 | Document Repository | Manual / Slide Generation |
 |---|---|
-| ![Repository](./screenshots/repository.png) | ![Manual Generation](./screenshots/manual.png) |
+| ![Repository](./screenshot/repository.png) | ![Manual Generation](./screenshot/manual.png) |
 
 ---
 
