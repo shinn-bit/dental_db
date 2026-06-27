@@ -33,8 +33,8 @@ SUMMARY_TEMPLATE = """
 """
 
 MIN_EXTRACTED_TEXT_LENGTH = 100
-SUMMARY_CHUNK_SIZE = 25000
-SUMMARY_CHUNK_OVERLAP = 1500
+SUMMARY_CHUNK_SIZE = 40000
+SUMMARY_CHUNK_OVERLAP = 2000
 
 CHUNK_MATERIAL_TEMPLATE = """
 以下は歯科資料本文の一部です。最終的には資料全体の「目次・章・節ごとの2000字以内要約」に統合します。
@@ -592,7 +592,7 @@ def summarize_chunk(chunk, index, total):
         f"対象範囲: チャンク {index + 1}/{total}\n\n"
         f"PDF本文の一部:\n{chunk}"
     )
-    return invoke_bedrock(prompt, max_tokens=8000)
+    return invoke_bedrock(prompt, max_tokens=5000)
 
 
 def generate_chunked_summary(bucket, file_id, extracted_text):
