@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, LayoutTemplate, MessageCircle, MoreHorizontal, Paperclip, Plus, Send, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Clipboard, ClipboardCheck, FileText, Globe, LayoutTemplate, MessageCircle, MoreHorizontal, Paperclip, Plus, Send, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 type ChatImage = { url: string; description: string; page: number; documentName: string };
-type ChatMessage = { role: "user" | "assistant"; text: string; images?: ChatImage[] };
+type ChatMessage = { role: "user" | "assistant"; text: string; images?: ChatImage[]; mode?: "rag" | "net" };
 type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" | "insurance" };
 
 const ALLOWED_MIME_TYPES = [
@@ -47,6 +47,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
   const [copiedMessageIndex, setCopiedMessageIndex] = useState<number | null>(null);
+
+  // チャットモード
+  const [chatMode, setChatMode] = useState<"rag" | "net">("rag");
 
   // フォルダフィルタ
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null);
@@ -274,6 +277,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message,
+          mode: chatMode,
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(bedrockSessionId ? { bedrockSessionId } : {}),
           ...(selectedFolderId ? { folderId: selectedFolderId } : {}),
@@ -295,6 +299,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
         {
           role: "assistant",
           text: assistantText,
+          mode: chatMode,
           ...(data.images && data.images.length > 0 ? { images: data.images } : {}),
         },
       ];
@@ -651,7 +656,61 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                 {messages.filter((m) => m.role === "user").length} 件の質問
               </span>
             </div>
-            <div className="row" style={{ gap: 8 }}>
+            <div className="row" style={{ gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              {/* モード切替 */}
+              <div
+                style={{
+                  display: "flex",
+                  border: "1px solid var(--line)",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                  flexShrink: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => { setChatMode("rag"); setBedrockSessionId(""); }}
+                  title="院内資料のみで回答"
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: 12,
+                    fontWeight: chatMode === "rag" ? 600 : 400,
+                    border: "none",
+                    borderRight: "1px solid var(--line)",
+                    background: chatMode === "rag" ? "var(--navy-tint-soft)" : "var(--panel)",
+                    color: chatMode === "rag" ? "var(--navy)" : "var(--ink-soft)",
+                    cursor: chatMode === "rag" ? "default" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <FileText size={12} aria-hidden="true" />
+                  資料モード
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setChatMode("net"); setBedrockSessionId(""); }}
+                  title="院内資料を優先し、一般知識も活用して回答"
+                  style={{
+                    padding: "4px 12px",
+                    fontSize: 12,
+                    fontWeight: chatMode === "net" ? 600 : 400,
+                    border: "none",
+                    background: chatMode === "net" ? "#e8f4e8" : "var(--panel)",
+                    color: chatMode === "net" ? "#2d7a2d" : "var(--ink-soft)",
+                    cursor: chatMode === "net" ? "default" : "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  <Globe size={12} aria-hidden="true" />
+                  ネットモード
+                </button>
+              </div>
               {folders.length > 0 && (
                 <select
                   value={selectedFolderId ?? ""}
@@ -713,6 +772,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                   key={index}
                   text={msg.text}
                   images={msg.images}
+                  mode={msg.mode}
                   copied={copiedMessageIndex === index}
                   onCopy={() => copyMessage(msg.text, index)}
                 />
@@ -727,7 +787,9 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                   className="dot ok"
                   style={{ animation: "pulse 1.2s infinite" }}
                 />
-                資料から該当箇所を探しています…
+                {chatMode === "net"
+                  ? "院内資料を検索し、回答を生成しています…"
+                  : "資料から該当箇所を探しています…"}
               </div>
             ) : null}
             {notice ? (
@@ -1132,14 +1194,17 @@ function UserMessage({ text }: { text: string }) {
 function AssistantMessage({
   text,
   images,
+  mode,
   copied,
   onCopy,
 }: {
   text: string;
   images?: ChatImage[];
+  mode?: "rag" | "net";
   copied: boolean;
   onCopy: () => void;
 }) {
+  const isNet = mode === "net";
   return (
     <div style={{ display: "flex", justifyContent: "flex-start" }}>
       <div style={{ width: "100%" }}>
@@ -1149,8 +1214,8 @@ function AssistantMessage({
               width: 22,
               height: 22,
               borderRadius: 6,
-              background: "var(--navy-tint)",
-              color: "var(--navy-deep)",
+              background: isNet ? "#d4edda" : "var(--navy-tint)",
+              color: isNet ? "#2d7a2d" : "var(--navy-deep)",
               display: "inline-flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1159,23 +1224,23 @@ function AssistantMessage({
               fontSize: 11,
             }}
           >
-            知
+            {isNet ? <Globe size={12} aria-hidden="true" /> : "知"}
           </span>
           <span
             className="tiny"
             style={{
-              color: "var(--navy-deep)",
+              color: isNet ? "#2d7a2d" : "var(--navy-deep)",
               fontWeight: 600,
               letterSpacing: "0.1em",
             }}
           >
-            院内ナレッジ
+            {isNet ? "ネットモード（資料優先）" : "院内ナレッジ"}
           </span>
         </div>
         <div
           style={{
             background: "#ffffff",
-            border: "1px solid var(--line)",
+            border: `1px solid ${isNet ? "#b8dfc0" : "var(--line)"}`,
             borderRadius: "4px 14px 14px 14px",
             padding: "14px 18px",
             fontSize: 14,
@@ -1202,7 +1267,7 @@ function AssistantMessage({
           </span>
           <span className="tag accent">
             <span className="truncate" style={{ maxWidth: 220 }}>
-              院内資料
+              {isNet ? "院内資料 + AI一般知識" : "院内資料"}
             </span>
             <span style={{ opacity: 0.75 }}>p.—</span>
           </span>

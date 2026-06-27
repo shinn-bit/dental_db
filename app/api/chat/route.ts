@@ -25,6 +25,7 @@ type ChatRequest = {
   manuals?: ChatSourceFile[];
   bedrockSessionId?: string;
   folderId?: string; // フォルダ選択時のフォルダID
+  mode?: "rag" | "net"; // "rag"=資料のみ（デフォルト）, "net"=資料優先+一般知識
 };
 
 type ChatSourceFile = {
@@ -168,8 +169,9 @@ export async function POST(request: Request) {
             },
             generationConfiguration: {
               promptTemplate: {
-                textPromptTemplate:
-                  "あなたは歯科医院の院内ナレッジだけを参照して回答するAIアシスタントです。検索結果に書かれている内容だけを根拠にしてください。一般知識、推測、外部知識、参考文献の補完は禁止です。検索結果に根拠がない場合は「選択された資料内では確認できません」とだけ明確に伝えてください。回答は現場スタッフ向けに簡潔な日本語にしてください。\n\n検索結果:\n$search_results$\n\n質問:\n$query$",
+                textPromptTemplate: body.mode === "net"
+                  ? "あなたは歯科医院スタッフを支援するAIアシスタントです。以下の院内資料の検索結果を最優先で参照してください。検索結果に質問への回答が含まれている場合は、必ずその内容を根拠に答えてください。検索結果だけでは回答が不十分な場合は、あなたの一般的な医療・歯科知識を補足として活用して答えてください。院内資料に基づく内容と一般知識に基づく内容は明確に区別して伝えてください。回答は現場スタッフ向けに分かりやすい日本語にしてください。\n\n院内資料の検索結果:\n$search_results$\n\n質問:\n$query$"
+                  : "あなたは歯科医院の院内ナレッジだけを参照して回答するAIアシスタントです。検索結果に書かれている内容だけを根拠にしてください。一般知識、推測、外部知識、参考文献の補完は禁止です。検索結果に根拠がない場合は「選択された資料内では確認できません」とだけ明確に伝えてください。回答は現場スタッフ向けに簡潔な日本語にしてください。\n\n検索結果:\n$search_results$\n\n質問:\n$query$",
               },
             },
           },
@@ -204,8 +206,8 @@ export async function POST(request: Request) {
       : [];
     console.log(`[chat/images] result: ${images.length} images`);
 
-    // フォルダフィルタ適用かつ検索結果0件の場合は分かりやすいメッセージに差し替え
-    const answerText = retrievalResults.length === 0 && !!body.folderId
+    // フォルダフィルタ適用かつ検索結果0件かつ資料モードの場合はガイドメッセージに差し替え
+    const answerText = retrievalResults.length === 0 && !!body.folderId && body.mode !== "net"
       ? "選択したフォルダの資料には、ご質問に関連する内容が見つかりませんでした。「すべての資料」に切り替えてもう一度お試しください。"
       : response.output?.text || "";
 
