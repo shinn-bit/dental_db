@@ -11,14 +11,16 @@ from botocore.exceptions import ClientError
 
 SUMMARY_TEMPLATE = """
 以下のPDF本文を、歯科医院の院内教育・診療補助に使えるように、目次・章・節ごとのMarkdown要約にしてください。
+本文中に「【ページ N】」形式のページマーカーが含まれます。
 
 出力形式:
 - 資料名が読み取れる場合は最初に `# 資料名` を置く
 - 以降は本文内の目次、章、節、見出し、番号付き項目に沿って `## 見出し名` で区切る
-- 各見出しの本文は400字以内
-- 各見出しの本文は2〜5個程度の箇条書きを基本にする
+- 各見出しの本文は2000字以内
+- 各見出しの本文は箇条書きを基本にする（項目数の制限なし、内容に応じて必要な分だけ書く）
 - 章や節の見出しが不明な場合は、内容のまとまりから自然な見出しを付ける
 - ページ番号や「第○章」「1-1」などが読み取れる場合は見出しに残す
+- 各見出しの末尾に `（p.N〜p.M）` 形式でページ範囲を必ず記載する（ページマーカーがない場合は省略可）
 
 内容ルール:
 - 資料に書かれている内容だけを書く
@@ -35,7 +37,8 @@ SUMMARY_CHUNK_SIZE = 25000
 SUMMARY_CHUNK_OVERLAP = 1500
 
 CHUNK_MATERIAL_TEMPLATE = """
-以下は歯科資料本文の一部です。最終的には資料全体の「目次・章・節ごとの400字以内要約」に統合します。
+以下は歯科資料本文の一部です。最終的には資料全体の「目次・章・節ごとの2000字以内要約」に統合します。
+本文中に「【ページ N】」形式のページマーカーが含まれます。
 この段階では、対象範囲に含まれる章・節・見出し候補と、その要約材料をMarkdownで抽出してください。
 
 出力ルール:
@@ -46,12 +49,14 @@ CHUNK_MATERIAL_TEMPLATE = """
 - この範囲にない内容は書かない
 - 章・節・見出しが読み取れる場合は必ず残す
 - 見出しが不明な場合は、内容のまとまりから仮見出しを付ける
-- 各見出しの要約材料は400字以内
+- 各見出しの要約材料は2000字以内
 - 数値、手順、分類、注意点、器材名、診断基準など具体情報を優先する
+- 各見出しの末尾に `（p.N〜p.M）` 形式でページ範囲を記載する（ページマーカーがない場合は省略可）
 
 出力形式:
 ## 見出し候補
 - 要約材料...
+（p.N〜p.M）
 """
 
 def env(name, default=""):
@@ -163,7 +168,9 @@ def get_gcp_credentials():
 
 
 def run_docai_ocr(pdf_bytes):
-    """Google Document AI でPDFをOCR処理してテキストを返す（15ページバッチ）。"""
+    """Google Document AI でPDFをOCR処理してテキストを返す（15ページバッチ）。
+    ページ境界に「【ページ N】」マーカーを挿入して返す。
+    """
     from google.cloud import documentai
     from pypdf import PdfReader, PdfWriter
 
@@ -173,7 +180,7 @@ def run_docai_ocr(pdf_bytes):
 
     reader = PdfReader(io.BytesIO(pdf_bytes))
     total = len(reader.pages)
-    texts = []
+    all_parts = []
 
     for start in range(0, total, DOCAI_BATCH_SIZE):
         end = min(start + DOCAI_BATCH_SIZE, total)
@@ -186,12 +193,24 @@ def run_docai_ocr(pdf_bytes):
         raw_doc = documentai.RawDocument(content=buf.getvalue(), mime_type="application/pdf")
         req = documentai.ProcessRequest(name=name, raw_document=raw_doc)
         result = client.process_document(request=req)
-        texts.append(result.document.text)
+
+        full_text = result.document.text
+        for i, page in enumerate(result.document.pages):
+            actual_page_num = start + i + 1
+            segs = (
+                page.layout.text_anchor.text_segments
+                if page.layout and page.layout.text_anchor
+                else []
+            )
+            page_text = "".join(
+                full_text[seg.start_index:seg.end_index] for seg in segs
+            ).strip()
+            all_parts.append(f"【ページ {actual_page_num}】\n{page_text}")
 
         if end < total:
             time.sleep(0.5)
 
-    return "\n".join(texts)
+    return "\n\n".join(all_parts)
 
 
 def start_ocr(event):
@@ -256,7 +275,7 @@ def create_knowledge_base_document(summary):
     normalized = "\n".join(line.rstrip() for line in summary.replace("\r\n", "\n").split("\n"))
     while "\n\n\n" in normalized:
         normalized = normalized.replace("\n\n\n", "\n\n")
-    return normalized.strip()[:12000]
+    return normalized.strip()
 
 
 def create_knowledge_base_document_from_text(metadata, text):
@@ -535,7 +554,7 @@ def invoke_bedrock(prompt, max_tokens=4096):
 
 def invoke_bedrock_summary(text):
     prompt = f"{SUMMARY_TEMPLATE}\n\nPDF本文:\n{text[:180000]}"
-    return invoke_bedrock(prompt, max_tokens=8192)
+    return invoke_bedrock(prompt, max_tokens=16000)
 
 
 def split_text_for_summary(text):
@@ -573,7 +592,7 @@ def summarize_chunk(chunk, index, total):
         f"対象範囲: チャンク {index + 1}/{total}\n\n"
         f"PDF本文の一部:\n{chunk}"
     )
-    return invoke_bedrock(prompt, max_tokens=3000)
+    return invoke_bedrock(prompt, max_tokens=8000)
 
 
 def generate_chunked_summary(bucket, file_id, extracted_text):

@@ -40,7 +40,7 @@ function createKnowledgeBaseDocument(summary: string) {
     .replace(/[ \t]+/g, " ")
     .trim();
 
-  return normalized.slice(0, 12000);
+  return normalized;
 }
 
 function createExecutionName(fileId: string) {
