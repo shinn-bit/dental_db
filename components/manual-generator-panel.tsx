@@ -1697,72 +1697,76 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         ) : null}
 
         {/* ヘッダー */}
-        <div className="panel-head">
-          <div className="row" style={{ gap: 8 }}>
-            <FileText size={16} style={{ color: "var(--navy)" }} aria-hidden="true" />
-            <span className="panel-title">解説書作成</span>
-            {messages.length > 0 ? (
-              <span style={{ fontSize: 10, color: "var(--ink-muted)", background: "var(--navy-tint-soft, #eef2f8)", padding: "2px 7px", borderRadius: 10, letterSpacing: "0.06em", flexShrink: 0 }}>
-                {docMode === "procedure" ? "手順作成" : docMode === "free" ? "自由作成" : "病気の要約"}
-              </span>
-            ) : null}
-          </div>
-          <div className="row" style={{ gap: 6 }}>
-            <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", flexShrink: 0 }}>
-              <button
-                type="button"
-                onClick={() => setManualMode("rag")}
-                title="院内資料のみで作成"
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 11,
-                  fontWeight: manualMode === "rag" ? 600 : 400,
-                  border: "none",
-                  borderRight: "1px solid var(--line)",
-                  background: manualMode === "rag" ? "var(--navy-tint-soft)" : "var(--panel)",
-                  color: manualMode === "rag" ? "var(--navy)" : "var(--ink-soft)",
-                  cursor: manualMode === "rag" ? "default" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <FileText size={11} aria-hidden="true" />
-                資料モード
-              </button>
-              <button
-                type="button"
-                onClick={() => setManualMode("ai")}
-                title="AIの一般知識も活用して作成"
-                style={{
-                  padding: "4px 10px",
-                  fontSize: 11,
-                  fontWeight: manualMode === "ai" ? 600 : 400,
-                  border: "none",
-                  background: manualMode === "ai" ? "#e8f4e8" : "var(--panel)",
-                  color: manualMode === "ai" ? "#2d7a2d" : "var(--ink-soft)",
-                  cursor: manualMode === "ai" ? "default" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 4,
-                  whiteSpace: "nowrap",
-                }}
-              >
-                <Globe size={11} aria-hidden="true" />
-                AIモード
-              </button>
+        <div className="panel-head" style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+          {/* タイトル行 */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div className="row" style={{ gap: 8 }}>
+              <FileText size={16} style={{ color: "var(--navy)" }} aria-hidden="true" />
+              <span className="panel-title">解説書作成</span>
+              {messages.length > 0 ? (
+                <span style={{ fontSize: 10, color: "var(--ink-muted)", background: "var(--navy-tint-soft, #eef2f8)", padding: "2px 7px", borderRadius: 10, letterSpacing: "0.06em", flexShrink: 0 }}>
+                  {docMode === "procedure" ? "手順作成" : docMode === "free" ? "自由作成" : "病気の要約"}
+                </span>
+              ) : null}
             </div>
-            <button type="button" onClick={newManual} title="新しい解説書"
-              style={{ width: 28, height: 28, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Plus size={15} aria-hidden="true" />
-            </button>
-            {onSwitchMode ? (
-              <button type="button" onClick={onSwitchMode} title="チャットモードへ"
+            <div className="row" style={{ gap: 6 }}>
+              <button type="button" onClick={newManual} title="新しい解説書"
                 style={{ width: 28, height: 28, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <MessageCircle size={15} aria-hidden="true" />
+                <Plus size={15} aria-hidden="true" />
               </button>
-            ) : null}
+              {onSwitchMode ? (
+                <button type="button" onClick={onSwitchMode} title="チャットモードへ"
+                  style={{ width: 28, height: 28, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <MessageCircle size={15} aria-hidden="true" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {/* モードトグル行 */}
+          <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", alignSelf: "flex-start" }}>
+            <button
+              type="button"
+              onClick={() => setManualMode("rag")}
+              title="院内資料のみで作成"
+              style={{
+                padding: "5px 14px",
+                fontSize: 12,
+                fontWeight: manualMode === "rag" ? 600 : 400,
+                border: "none",
+                borderRight: "1px solid var(--line)",
+                background: manualMode === "rag" ? "var(--navy-tint-soft)" : "var(--panel)",
+                color: manualMode === "rag" ? "var(--navy)" : "var(--ink-soft)",
+                cursor: manualMode === "rag" ? "default" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <FileText size={12} aria-hidden="true" />
+              資料モード
+            </button>
+            <button
+              type="button"
+              onClick={() => setManualMode("ai")}
+              title="AIの一般知識も活用して作成"
+              style={{
+                padding: "5px 14px",
+                fontSize: 12,
+                fontWeight: manualMode === "ai" ? 600 : 400,
+                border: "none",
+                background: manualMode === "ai" ? "#e8f4e8" : "var(--panel)",
+                color: manualMode === "ai" ? "#2d7a2d" : "var(--ink-soft)",
+                cursor: manualMode === "ai" ? "default" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 5,
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Globe size={12} aria-hidden="true" />
+              AIモード
+            </button>
           </div>
         </div>
 
