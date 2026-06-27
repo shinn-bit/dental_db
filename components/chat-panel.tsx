@@ -56,7 +56,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const LINE_HEIGHT = 22.4;
@@ -104,9 +104,17 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
       .catch(() => {});
   }, [initialSessionId]);
 
-  // Auto scroll to bottom on new messages
+  // マウント時にtextarea高さを初期化
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    adjustTextareaHeight();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Auto scroll to bottom on new messages — scrollIntoView は親(.main)もスクロールするため
+  // コンテナを直接操作して画面レイアウトが動かないようにする
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
   }, [messages, loading]);
 
   function handleDragOver(e: React.DragEvent) {
@@ -728,6 +736,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
 
           {/* メッセージ一覧 */}
           <div
+            ref={messagesContainerRef}
             style={{
               flex: 1,
               minHeight: 0,
@@ -797,7 +806,6 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                 {notice}
               </p>
             ) : null}
-            <div ref={messagesEndRef} />
           </div>
 
           {/* 入力エリア */}
@@ -891,7 +899,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
               <textarea
                 ref={textareaRef}
                 className="textarea"
-                rows={6}
+                rows={1}
                 placeholder="質問を入力"
                 value={input}
                 onChange={(e) => {
