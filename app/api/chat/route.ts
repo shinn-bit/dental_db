@@ -25,7 +25,7 @@ type ChatRequest = {
   manuals?: ChatSourceFile[];
   bedrockSessionId?: string;
   folderId?: string; // フォルダ選択時のフォルダID
-  mode?: "rag" | "net"; // "rag"=資料のみ（デフォルト）, "net"=資料優先+一般知識
+  mode?: "rag" | "net"; // "rag"=資料のみ（デフォルト）, "net"=AIモード（資料優先+一般知識）
 };
 
 type ChatSourceFile = {

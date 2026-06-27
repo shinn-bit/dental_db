@@ -708,7 +708,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
                   }}
                 >
                   <Globe size={12} aria-hidden="true" />
-                  ネットモード
+                  AIモード
                 </button>
               </div>
               {folders.length > 0 && (
@@ -1234,7 +1234,7 @@ function AssistantMessage({
               letterSpacing: "0.1em",
             }}
           >
-            {isNet ? "ネットモード（資料優先）" : "院内ナレッジ"}
+            {isNet ? "AIモード（資料優先）" : "院内ナレッジ"}
           </span>
         </div>
         <div
