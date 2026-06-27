@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Archive, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Folder, LayoutTemplate, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
+import { Archive, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, Folder, Globe, LayoutTemplate, MessageCircle, MoreHorizontal, Plus, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
@@ -532,6 +532,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
 
+  const [manualMode, setManualMode] = useState<"rag" | "ai">("ai");
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
   const [docMode, setDocMode] = useState<"summary" | "procedure" | "free">("summary");
@@ -1127,9 +1128,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       setEditSelectedSlides([]);
     }
 
-    // 初回かつWord生成のみRAGを使用（スライドはトークン圧迫で500エラーになるため無効）
+    // 資料モード時のみRAGを使用（AIモードはRAGスキップ）
+    // スライドはRAGコンテキストを3000字以内に絞ってトークン圧迫を防ぐ
     let ragContext = "";
-    if (isFirstMessage && text.trim() && currentOutputType === "word") {
+    if (isFirstMessage && text.trim() && manualMode === "rag") {
       try {
         setNotice("院内資料を検索中…");
         const ctxRes = await fetch("/api/manual-context", {
@@ -1164,7 +1166,10 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         const highOnly = ragContext.split("\n\n【参考程度の院内資料】")[0];
         ragForPrompt = highOnly.length > 3000 ? highOnly.slice(0, 3000) + "\n…(省略)" : highOnly;
       }
-      augmentedText = `【院内ナレッジ資料からの関連情報（この内容を参考に作成してください）】\n${ragForPrompt}\n\n【作成指示】\n${augmentedText}`;
+      const ragInstruction = manualMode === "rag"
+        ? "【院内ナレッジ資料からの関連情報（この内容のみを根拠に作成してください。院内資料に記載のない内容は含めないでください）】"
+        : "【院内ナレッジ資料からの関連情報（この内容を参考に作成してください）】";
+      augmentedText = `${ragInstruction}\n${ragForPrompt}\n\n【作成指示】\n${augmentedText}`;
     }
 
     try {
@@ -1703,6 +1708,51 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
             ) : null}
           </div>
           <div className="row" style={{ gap: 6 }}>
+            <div style={{ display: "flex", border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => setManualMode("rag")}
+                title="院内資料のみで作成"
+                style={{
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  fontWeight: manualMode === "rag" ? 600 : 400,
+                  border: "none",
+                  borderRight: "1px solid var(--line)",
+                  background: manualMode === "rag" ? "var(--navy-tint-soft)" : "var(--panel)",
+                  color: manualMode === "rag" ? "var(--navy)" : "var(--ink-soft)",
+                  cursor: manualMode === "rag" ? "default" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <FileText size={11} aria-hidden="true" />
+                資料モード
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualMode("ai")}
+                title="AIの一般知識も活用して作成"
+                style={{
+                  padding: "4px 10px",
+                  fontSize: 11,
+                  fontWeight: manualMode === "ai" ? 600 : 400,
+                  border: "none",
+                  background: manualMode === "ai" ? "#e8f4e8" : "var(--panel)",
+                  color: manualMode === "ai" ? "#2d7a2d" : "var(--ink-soft)",
+                  cursor: manualMode === "ai" ? "default" : "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                <Globe size={11} aria-hidden="true" />
+                AIモード
+              </button>
+            </div>
             <button type="button" onClick={newManual} title="新しい解説書"
               style={{ width: 28, height: 28, border: "none", background: "transparent", cursor: "pointer", borderRadius: 6, color: "var(--ink-soft)", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Plus size={15} aria-hidden="true" />
