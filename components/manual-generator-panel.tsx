@@ -532,6 +532,8 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
 
+  const [activeTab, setActiveTab] = useState<"chat" | "preview">("chat");
+
   const [manualMode, setManualMode] = useState<"rag" | "ai">("ai");
   const [outputType, setOutputType] = useState<"word" | "slide">("word");
   const [generatedOutputType, setGeneratedOutputType] = useState<"word" | "slide">("word");
@@ -736,6 +738,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     setDocMode("summary");
     setRepoItemId(null);
     embedCounterRef.current = 0;
+    setActiveTab("chat");
   }
 
   // ── S3 image upload ──────────────────────────────────────────────────────
@@ -955,6 +958,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       setPendingImages([]);
       setPendingDocs([]);
       setNotice("");
+      if (session.content || session.slidesHtml?.length) setActiveTab("preview");
     } catch {
       setNotice("セッションの読み込みに失敗しました");
     } finally {
@@ -1204,6 +1208,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
           setMessages(finalMsgs);
           setNotice("");
           saveSession({ msgs: finalMsgs, body: content, slides: updated, outType: currentOutputType, theme: generatedTheme });
+          setActiveTab("preview");
         } else {
           // ── 全スライド生成 ─────────────────────────────────────────────
           setNotice("スライドを生成中…");
@@ -1238,6 +1243,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
           setMessages(finalMsgs);
           setNotice("");
           saveSession({ msgs: finalMsgs, body: "", slides, outType: currentOutputType, theme });
+          setActiveTab("preview");
         }
       } else {
         // ── Word 文書生成 ─────────────────────────────────────────────────
@@ -1253,6 +1259,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         const finalMsgs = [...newHistory, { role: "model" as const, text: accumulated, displayText: `✓ ${docLabel}を生成・更新しました。修正があればお知らせください。` }];
         setMessages(finalMsgs);
         saveSession({ msgs: finalMsgs, body: accumulated, slides: [], outType: currentOutputType, theme });
+        setActiveTab("preview");
       }
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "生成に失敗しました");
@@ -1673,11 +1680,52 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         ) : null}
       </div>
 
+      {/* ── タブ切替ラッパー ── */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+
+        {/* ── タブバー ── */}
+        <div style={{ display: "flex", borderBottom: "1px solid var(--line)", background: "var(--panel-deep, #f8f9fa)", flexShrink: 0 }}>
+          <button
+            type="button"
+            onClick={() => setActiveTab("chat")}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "10px 20px", fontSize: 13, fontWeight: activeTab === "chat" ? 600 : 400,
+              border: "none", borderBottom: `2px solid ${activeTab === "chat" ? "var(--navy)" : "transparent"}`,
+              background: "transparent", cursor: "pointer",
+              color: activeTab === "chat" ? "var(--navy)" : "var(--ink-soft)",
+              transition: "all .12s ease",
+            }}
+          >
+            <MessageCircle size={14} aria-hidden="true" />
+            チャット
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("preview")}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "10px 20px", fontSize: 13, fontWeight: activeTab === "preview" ? 600 : 400,
+              border: "none", borderBottom: `2px solid ${activeTab === "preview" ? "var(--navy)" : "transparent"}`,
+              background: "transparent", cursor: "pointer",
+              color: activeTab === "preview" ? "var(--navy)" : "var(--ink-soft)",
+              transition: "all .12s ease",
+              position: "relative",
+            }}
+          >
+            <FileText size={14} aria-hidden="true" />
+            プレビュー
+            {(content || slidesHtml.length > 0) && activeTab !== "preview" ? (
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--navy)", position: "absolute", top: 8, right: 10 }} />
+            ) : null}
+          </button>
+        </div>
+
       {/* ══════════════════════════════════════════════════════════════════════
-          左パネル: 指示チャット
+          チャットパネル
       ══════════════════════════════════════════════════════════════════════ */}
       <div
-        style={{ width: 320, flexShrink: 0, display: "flex", flexDirection: "column", borderRight: "1px solid var(--line)", position: "relative" }}
+        style={{ flex: 1, display: activeTab === "chat" ? "flex" : "none", flexDirection: "column", minHeight: 0, position: "relative" }}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onDrop={handleDrop}
@@ -1687,7 +1735,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
             position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none",
             background: "rgba(44,82,130,0.06)",
             border: "2px dashed var(--navy)",
-            borderRadius: "16px 0 0 16px",
+            borderRadius: 0,
             display: "flex", alignItems: "center", justifyContent: "center",
           }}>
             <span style={{ color: "var(--navy)", fontSize: 14, fontWeight: 600, letterSpacing: "0.08em" }}>
@@ -1997,7 +2045,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         ) : null}
 
         {/* ── 入力エリア ── */}
-        <div style={{ padding: 12, borderTop: "1px solid var(--line)", background: "var(--panel-deep)", borderBottomLeftRadius: 16 }}>
+        <div style={{ padding: 12, borderTop: "1px solid var(--line)", background: "var(--panel-deep)" }}>
           <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "stretch" }}>
             <button type="button" onClick={() => fileInputRef.current?.click()} title="ファイルを添付（画像・PDF・DOCX）"
               style={{ width: 44, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, border: "1px solid var(--line)", borderRadius: "var(--radius)", background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 10, letterSpacing: "0.1em", fontWeight: 500 }}>
@@ -2005,7 +2053,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
               <span>追加</span>
             </button>
             <input type="file" accept="image/*,.pdf,.docx" multiple hidden ref={fileInputRef} onChange={handleFileAttach} />
-            <textarea className="textarea" rows={5} placeholder={docMode === "procedure" ? "手順書の内容を入力…" : docMode === "free" ? "作成内容を自由に入力…" : "病気・処置名などを入力…"} value={input}
+            <textarea className="textarea" rows={3} placeholder={docMode === "procedure" ? "手順書の内容を入力…" : docMode === "free" ? "作成内容を自由に入力…" : "病気・処置名などを入力…"} value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); sendMessage(); } }}
               disabled={loading} style={{ resize: "none" }}
@@ -2021,9 +2069,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       </div>
 
       {/* ══════════════════════════════════════════════════════════════════════
-          右パネル: プレビュー
+          プレビューパネル
       ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+      <div style={{ flex: 1, display: activeTab === "preview" ? "flex" : "none", flexDirection: "column", minHeight: 0 }}>
         <div className="panel-head">
           <span className="tiny soft">
             {generatedOutputType === "slide" && slidesHtml.length > 0
@@ -2112,13 +2160,14 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: "100%", gap: 10, color: "var(--ink-faint)" }}>
                 <FileText size={32} strokeWidth={1.2} aria-hidden="true" />
                 <p style={{ margin: 0, fontSize: 13, textAlign: "center", lineHeight: 1.8 }}>
-                  左のチャットから解説書を作成します
+                  チャットタブから解説書を作成します
                 </p>
               </div>
             )}
           </div>
         )}
       </div>
+      </div>{/* end チャット + プレビュー縦並びラッパー */}
     </section>
 
     {/* ── 保管庫保存モーダル ── */}
