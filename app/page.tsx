@@ -10,7 +10,7 @@ function HomeContent() {
   const sessionId = searchParams.get("sessionId");
 
   return (
-    <div style={{ flex: 1, display: "flex", alignItems: "stretch", minHeight: 0 }}>
+    <div style={{ flex: 1, display: "flex", alignItems: "stretch", minHeight: 0, minWidth: 0 }}>
       <ChatPanel
         initialSessionId={sessionId}
         onSwitchMode={() => router.push("/manual")}

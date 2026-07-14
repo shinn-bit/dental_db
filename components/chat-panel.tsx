@@ -369,7 +369,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
     <>
       <section
         className="panel"
-        style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0 }}
+        style={{ display: "flex", flexDirection: "row", flex: 1, minHeight: 0, minWidth: 0 }}
       >
         {/* ── サイドバー ── */}
         <div
@@ -745,6 +745,7 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
               flexDirection: "column",
               gap: 22,
               overflowY: "auto",
+              overflowX: "hidden",
             }}
           >
             {messages.length === 0 && !loading ? (
@@ -1214,8 +1215,8 @@ function AssistantMessage({
 }) {
   const isNet = mode === "net";
   return (
-    <div style={{ display: "flex", justifyContent: "flex-start" }}>
-      <div style={{ width: "100%" }}>
+    <div style={{ display: "flex", justifyContent: "flex-start", minWidth: 0 }}>
+      <div style={{ width: "100%", minWidth: 0 }}>
         <div className="row" style={{ marginBottom: 8, gap: 8 }}>
           <span
             style={{
