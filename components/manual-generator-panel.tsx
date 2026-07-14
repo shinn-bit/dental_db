@@ -7,7 +7,7 @@ import { Archive, ChevronLeft, ChevronRight, Download, ExternalLink, FileText, F
 import { Button } from "@/components/ui";
 
 const GEMINI_API_KEY = process.env.NEXT_PUBLIC_GEMINI_API_KEY ?? "";
-const GEMINI_FLASH_MODEL = "gemini-2.5-flash";
+const GEMINI_FLASH_MODEL = "gemini-3.5-flash";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -151,7 +151,7 @@ async function generateSlidesStreaming(
   );
   if (!res.ok || !res.body) {
     const errText = await res.text().catch(() => "");
-    if (res.status === 503) throw new Error("gemini-2.5-flash が混雑しています。しばらく待ってから再試行してください。");
+    if (res.status === 503) throw new Error(`${model} が混雑しています。しばらく待ってから再試行してください。`);
     throw new Error(`Gemini API エラー ${res.status} (${model}): ${errText}`);
   }
   const reader = res.body.getReader();
