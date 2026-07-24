@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
-  Check, ChevronDown, ChevronRight, Clipboard, Edit,
+  Check, ChevronDown, ChevronRight, Clipboard, Download, Edit,
   Folder, FolderOpen, Images, MoreHorizontal, Plus,
   RefreshCw, Search, Trash2, Upload, X,
 } from "lucide-react";
@@ -162,6 +162,7 @@ export function FileRepositoryManager() {
   const [summaryProcessingId, setSummaryProcessingId] = useState<string | null>(null);
   const [blockedSummaryId, setBlockedSummaryId] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
+  const [summaryDownloading, setSummaryDownloading] = useState(false);
   const [libQuery, setLibQuery] = useState("");
 
   // Load from localStorage on mount
@@ -446,6 +447,29 @@ export function FileRepositoryManager() {
       setSummaryCopied(true);
       window.setTimeout(() => setSummaryCopied(false), 1600);
     } catch { setNotice("コピーに失敗しました。"); }
+  }
+
+  async function downloadSummaryWord() {
+    if (!summaryDraft || !selectedSummary) return;
+    const theme = selectedSummary.name.replace(/\.[^.]+$/, "") || "要約";
+    setSummaryDownloading(true);
+    try {
+      const res = await fetch("/api/generate-manual/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: summaryDraft, theme }),
+      });
+      if (!res.ok) throw new Error(`docx エラー ${res.status}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `${theme}.docx`; a.click();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Word ダウンロードに失敗しました。");
+    } finally {
+      setSummaryDownloading(false);
+    }
   }
 
   function openDetail(file: RepositoryFile) {
@@ -822,8 +846,9 @@ export function FileRepositoryManager() {
       {selectedSummary ? (
         <SummaryOverlay file={selectedSummary} draft={summaryDraft} editing={summaryEditing}
           copied={summaryCopied} processing={summaryProcessingId === selectedSummary.id}
+          downloading={summaryDownloading}
           onDraft={setSummaryDraft} onEdit={() => setSummaryEditing(true)} onSave={saveSummary}
-          onCopy={copySummary} onClose={() => setSelectedSummary(null)} />
+          onCopy={copySummary} onDownload={downloadSummaryWord} onClose={() => setSelectedSummary(null)} />
       ) : null}
     </>
   );
@@ -1386,9 +1411,9 @@ function SourceViewerOverlay({ file, onClose }: { file: RepositoryFile; onClose:
 }
 
 // ── Summary overlay ──────────────────────────────────────────────
-function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onEdit, onSave, onCopy, onClose }: {
-  file: RepositoryFile; draft: string; editing: boolean; copied: boolean; processing: boolean;
-  onDraft: (v: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onClose: () => void;
+function SummaryOverlay({ file, draft, editing, copied, processing, downloading, onDraft, onEdit, onSave, onCopy, onDownload, onClose }: {
+  file: RepositoryFile; draft: string; editing: boolean; copied: boolean; processing: boolean; downloading: boolean;
+  onDraft: (v: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onDownload: () => void; onClose: () => void;
 }) {
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
@@ -1413,7 +1438,8 @@ function SummaryOverlay({ file, draft, editing, copied, processing, onDraft, onE
           </div>
           <div className="row" style={{ gap: 6 }}>
             <Button variant="secondary" size="sm" onClick={onCopy}>{copied ? <Check size={13} /> : <Clipboard size={13} />}{copied ? "コピーしました" : "コピー"}</Button>
-            {editing ? <Button size="sm" disabled={processing} onClick={onSave}><Check size={13} />保存</Button> : <Button variant="secondary" size="sm" onClick={onEdit}><Edit size={13} />編集</Button>}
+            <Button variant="secondary" size="sm" disabled={downloading} onClick={onDownload}><Download size={13} />{downloading ? "作成中…" : "Word"}</Button>
+            {editing ?<Button size="sm" disabled={processing} onClick={onSave}><Check size={13} />保存</Button> : <Button variant="secondary" size="sm" onClick={onEdit}><Edit size={13} />編集</Button>}
             <button type="button" className="btn ghost icon" onClick={onClose} title="閉じる (Esc)"><X size={16} /></button>
           </div>
         </div>
