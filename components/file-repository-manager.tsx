@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Check, ChevronDown, ChevronRight, Clipboard, Download, Edit,
-  Folder, FolderOpen, Images, MoreHorizontal, Plus,
+  ExternalLink, Folder, FolderOpen, Images, MoreHorizontal, Plus,
   RefreshCw, Search, Trash2, Upload, X,
 } from "lucide-react";
 import { Button, FileSpine, FieldLabel } from "@/components/ui";
@@ -163,6 +163,7 @@ export function FileRepositoryManager() {
   const [blockedSummaryId, setBlockedSummaryId] = useState<string | null>(null);
   const [summaryCopied, setSummaryCopied] = useState(false);
   const [summaryDownloading, setSummaryDownloading] = useState(false);
+  const [summaryGoogleSaving, setSummaryGoogleSaving] = useState(false);
   const [libQuery, setLibQuery] = useState("");
 
   // Load from localStorage on mount
@@ -469,6 +470,100 @@ export function FileRepositoryManager() {
       setNotice(error instanceof Error ? error.message : "Word ダウンロードに失敗しました。");
     } finally {
       setSummaryDownloading(false);
+    }
+  }
+
+  async function saveSummaryToGoogleDocs() {
+    const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID;
+    const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY;
+    if (!clientId || !apiKey || !summaryDraft || !selectedSummary) return;
+    const theme = selectedSummary.name.replace(/\.[^.]+$/, "") || "要約";
+    setSummaryGoogleSaving(true);
+    setNotice("Google ドライブに接続中…");
+    try {
+      // 1. スクリプトをロード
+      const loadScript = (src: string) => new Promise<void>((resolve, reject) => {
+        if (document.querySelector(`script[src="${src}"]`)) { resolve(); return; }
+        const s = document.createElement("script");
+        s.src = src; s.onload = () => resolve(); s.onerror = () => reject(new Error(`読み込み失敗: ${src}`));
+        document.head.appendChild(s);
+      });
+      await Promise.all([
+        loadScript("https://accounts.google.com/gsi/client"),
+        loadScript("https://apis.google.com/js/api.js"),
+      ]);
+      await new Promise<void>(resolve => window.gapi.load("picker", resolve));
+
+      // 2. OAuth トークン取得（drive.file スコープ）
+      const token = await new Promise<string>((resolve, reject) => {
+        google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: "https://www.googleapis.com/auth/drive.file",
+          callback: (resp) => resp.access_token ? resolve(resp.access_token) : reject(new Error("Google 認証に失敗しました")),
+        }).requestAccessToken({ prompt: "" });
+      });
+
+      // 3. .docx を生成
+      setNotice("文書を生成中…");
+      const res = await fetch("/api/generate-manual/docx", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: summaryDraft, theme }),
+      });
+      if (!res.ok) throw new Error(`docx 生成エラー ${res.status}`);
+      const blob = await res.blob();
+
+      // 4. フォルダピッカーで保存先を選択
+      setNotice("保存先フォルダを選択してください…");
+      const folderId = await new Promise<string | null>((resolve) => {
+        new google.picker.PickerBuilder()
+          .addView(
+            new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+              .setSelectFolderEnabled(true)
+              .setIncludeFolders(true)
+          )
+          .setOAuthToken(token)
+          .setDeveloperKey(apiKey)
+          .setTitle("保存先フォルダを選択")
+          .setCallback((data) => {
+            if (data.action === google.picker.Action.PICKED) resolve(data.docs?.[0]?.id ?? null);
+            else if (data.action === google.picker.Action.CANCEL) resolve(null);
+          })
+          .build()
+          .setVisible(true);
+      });
+
+      // 5. Drive にアップロード（.docx → Google ドキュメントに自動変換）
+      setNotice("Google ドキュメントに保存中…");
+      const metadata: Record<string, unknown> = {
+        name: theme,
+        mimeType: "application/vnd.google-apps.document",
+      };
+      if (folderId) metadata.parents = [folderId];
+
+      const docxMime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+      const form = new FormData();
+      form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
+      form.append("file", new Blob([await blob.arrayBuffer()], { type: docxMime }), `${theme}.docx`);
+
+      const uploadRes = await fetch(
+        "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart",
+        { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form }
+      );
+      if (!uploadRes.ok) {
+        const errText = await uploadRes.text();
+        throw new Error(`Drive アップロードエラー ${uploadRes.status}: ${errText}`);
+      }
+      const uploaded = (await uploadRes.json()) as { id: string };
+
+      // 6. 新タブで開く
+      window.open(`https://docs.google.com/document/d/${uploaded.id}/edit`, "_blank");
+      setNotice("✓ Google ドキュメントに保存しました");
+      window.setTimeout(() => setNotice(n => n === "✓ Google ドキュメントに保存しました" ? "" : n), 3000);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Google ドキュメントへの保存に失敗しました");
+    } finally {
+      setSummaryGoogleSaving(false);
     }
   }
 
@@ -846,9 +941,11 @@ export function FileRepositoryManager() {
       {selectedSummary ? (
         <SummaryOverlay file={selectedSummary} draft={summaryDraft} editing={summaryEditing}
           copied={summaryCopied} processing={summaryProcessingId === selectedSummary.id}
-          downloading={summaryDownloading}
+          downloading={summaryDownloading} googleSaving={summaryGoogleSaving}
+          googleEnabled={Boolean(process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID)}
           onDraft={setSummaryDraft} onEdit={() => setSummaryEditing(true)} onSave={saveSummary}
-          onCopy={copySummary} onDownload={downloadSummaryWord} onClose={() => setSelectedSummary(null)} />
+          onCopy={copySummary} onDownload={downloadSummaryWord} onSaveGoogle={saveSummaryToGoogleDocs}
+          onClose={() => setSelectedSummary(null)} />
       ) : null}
     </>
   );
@@ -857,6 +954,12 @@ export function FileRepositoryManager() {
 const treeMenuItemSt: React.CSSProperties = {
   width: "100%", textAlign: "left", padding: "6px 12px", fontSize: 12,
   border: "none", background: "none", cursor: "pointer", color: "var(--ink)", whiteSpace: "nowrap",
+};
+
+const saveMenuItemSt: React.CSSProperties = {
+  display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left",
+  padding: "9px 14px", fontSize: 13, border: "none", background: "none", cursor: "pointer",
+  color: "var(--ink)", whiteSpace: "nowrap",
 };
 
 // ── Folder content view ──────────────────────────────────────────
@@ -1411,10 +1514,12 @@ function SourceViewerOverlay({ file, onClose }: { file: RepositoryFile; onClose:
 }
 
 // ── Summary overlay ──────────────────────────────────────────────
-function SummaryOverlay({ file, draft, editing, copied, processing, downloading, onDraft, onEdit, onSave, onCopy, onDownload, onClose }: {
-  file: RepositoryFile; draft: string; editing: boolean; copied: boolean; processing: boolean; downloading: boolean;
-  onDraft: (v: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onDownload: () => void; onClose: () => void;
+function SummaryOverlay({ file, draft, editing, copied, processing, downloading, googleSaving, googleEnabled, onDraft, onEdit, onSave, onCopy, onDownload, onSaveGoogle, onClose }: {
+  file: RepositoryFile; draft: string; editing: boolean; copied: boolean; processing: boolean; downloading: boolean; googleSaving: boolean; googleEnabled: boolean;
+  onDraft: (v: string) => void; onEdit: () => void; onSave: () => void; onCopy: () => void; onDownload: () => void; onSaveGoogle: () => void; onClose: () => void;
 }) {
+  const [saveMenuOpen, setSaveMenuOpen] = useState(false);
+  const saving = downloading || googleSaving;
   useEffect(() => {
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") onClose(); }
     document.addEventListener("keydown", onKey);
@@ -1438,8 +1543,33 @@ function SummaryOverlay({ file, draft, editing, copied, processing, downloading,
           </div>
           <div className="row" style={{ gap: 6 }}>
             <Button variant="secondary" size="sm" onClick={onCopy}>{copied ? <Check size={13} /> : <Clipboard size={13} />}{copied ? "コピーしました" : "コピー"}</Button>
-            <Button variant="secondary" size="sm" disabled={downloading} onClick={onDownload}><Download size={13} />{downloading ? "作成中…" : "Word"}</Button>
-            {editing ?<Button size="sm" disabled={processing} onClick={onSave}><Check size={13} />保存</Button> : <Button variant="secondary" size="sm" onClick={onEdit}><Edit size={13} />編集</Button>}
+            {editing ? (
+              <Button size="sm" disabled={processing} onClick={onSave}><Check size={13} />保存</Button>
+            ) : (
+              <>
+                <div style={{ position: "relative" }}>
+                  <Button variant="secondary" size="sm" disabled={saving} onClick={() => setSaveMenuOpen(o => !o)}>
+                    <Download size={13} />{saving ? "保存中…" : "保存"}<ChevronDown size={12} />
+                  </Button>
+                  {saveMenuOpen ? (
+                    <>
+                      <div onClick={() => setSaveMenuOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 100 }} />
+                      <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 101, background: "#fff", border: "1px solid var(--line)", borderRadius: 8, boxShadow: "0 6px 18px rgba(0,0,0,.16)", minWidth: 190, padding: "4px 0" }}>
+                        <button type="button" style={saveMenuItemSt} onClick={() => { setSaveMenuOpen(false); onDownload(); }}>
+                          <Download size={14} />Word (.docx)
+                        </button>
+                        {googleEnabled ? (
+                          <button type="button" style={saveMenuItemSt} onClick={() => { setSaveMenuOpen(false); onSaveGoogle(); }}>
+                            <ExternalLink size={14} />Google ドキュメント
+                          </button>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+                <Button variant="secondary" size="sm" onClick={onEdit}><Edit size={13} />編集</Button>
+              </>
+            )}
             <button type="button" className="btn ghost icon" onClick={onClose} title="閉じる (Esc)"><X size={16} /></button>
           </div>
         </div>
