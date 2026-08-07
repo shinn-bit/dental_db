@@ -11,6 +11,7 @@ const navItems = [
   { href: "/repository", label: "資料庫" },
   { href: "/manual-repository", label: "保管庫" },
   { href: "/insurance", label: "保険請求" },
+  { href: "/data-vault", label: "データ保管庫" },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {

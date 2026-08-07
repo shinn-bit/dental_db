@@ -136,7 +136,8 @@ export function FileRepositoryManager() {
   const [destFolderId, setDestFolderId] = useState<string | null>(null);
   const [addingParentId, setAddingParentId] = useState<string | null | undefined>(undefined);
   const [newFolderName, setNewFolderName] = useState("");
-  const [folderMenuId, setFolderMenuId] = useState<string | null>(null);
+  // 右クリック／⋯ボタンで開くフォルダ操作メニュー。folder が null ならルート
+  const [folderMenu, setFolderMenu] = useState<{ folder: RepoFolder | null; x: number; y: number } | null>(null);
   const [editingFolderId, setEditingFolderId] = useState<string | null>(null);
   const [editingFolderName, setEditingFolderName] = useState("");
   const [draggedId, setDraggedId] = useState<string | null>(null);
@@ -180,6 +181,41 @@ export function FileRepositoryManager() {
     setAssignmentsState(prev => { const next = fn(prev); writeAssignments(next); return next; });
   }
 
+  // メニュー外クリック・Escape・リサイズで閉じる
+  useEffect(() => {
+    if (!folderMenu) return;
+    const close = () => setFolderMenu(null);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFolderMenu(null); };
+    window.addEventListener("click", close);
+    window.addEventListener("resize", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", close);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [folderMenu]);
+
+  // ── 右クリックメニュー ────────────────────────────────────────
+  function openFolderMenu(e: React.MouseEvent, folder: RepoFolder | null) {
+    e.preventDefault();
+    e.stopPropagation();
+    setFolderMenu({ folder, x: e.clientX, y: e.clientY });
+  }
+
+  function startAddingUnder(parentId: string | null) {
+    setFolderMenu(null);
+    setNewFolderName("");
+    setAddingParentId(parentId);
+    if (parentId) setExpandedIds(prev => new Set([...prev, parentId]));
+  }
+
+  function startRenamingFolder(folder: RepoFolder) {
+    setFolderMenu(null);
+    setEditingFolderId(folder.id);
+    setEditingFolderName(folder.name);
+  }
+
   // ── Folder CRUD ───────────────────────────────────────────────
   function addFolder(name: string, parentId: string | null) {
     if (!name.trim()) return;
@@ -195,6 +231,7 @@ export function FileRepositoryManager() {
     setEditingFolderId(null);
   }
   function deleteFolder(id: string) {
+    setFolderMenu(null);
     if (!window.confirm("このフォルダを削除します。フォルダ内のファイルは未整理に移動されます。")) return;
     const descendants = collectDescendants(folders, id);
     setFolders(prev => prev.filter(f => !descendants.has(f.id)));
@@ -206,7 +243,7 @@ export function FileRepositoryManager() {
       return next;
     });
     if (selectedFolderId && descendants.has(selectedFolderId)) setSelectedFolderId(null);
-    setFolderMenuId(null);
+    setFolderMenu(null);
   }
   function moveFile(fileId: string, folderId: string | null, persistToS3 = true) {
     setAssignments(prev => ({ ...prev, [fileId]: folderId }));
@@ -670,7 +707,7 @@ export function FileRepositoryManager() {
               outline: isDropTarget ? "2px solid var(--navy-deep)" : "none",
               outlineOffset: -2, position: "relative",
             }}
-            onMouseLeave={() => { if (folderMenuId === folder.id) setFolderMenuId(null); }}
+            onContextMenu={e => openFolderMenu(e, folder)}
           >
             {editingFolderId === folder.id ? (
               <input autoFocus value={editingFolderName}
@@ -685,7 +722,7 @@ export function FileRepositoryManager() {
                   onClick={() => {
                     setExpandedIds(prev => { const s = new Set(prev); s.has(folder.id) ? s.delete(folder.id) : s.add(folder.id); return s; });
                     setSelectedFolderId(folder.id);
-                    setFolderMenuId(null);
+                    setFolderMenu(null);
                   }}
                   style={{ display: "flex", alignItems: "center", gap: 4, flex: 1, background: "none", border: "none", cursor: "pointer", minWidth: 0, padding: 0, color: "inherit" }}>
                   <span style={{ width: 13, flexShrink: 0, display: "flex", justifyContent: "center" }}>
@@ -698,26 +735,12 @@ export function FileRepositoryManager() {
                     {folder.name}
                   </span>
                 </button>
-                <button type="button"
-                  onClick={e => { e.stopPropagation(); setFolderMenuId(folderMenuId === folder.id ? null : folder.id); }}
+                <button type="button" title="操作"
+                  onClick={e => openFolderMenu(e, folder)}
                   style={{ width: 16, height: 16, display: "flex", alignItems: "center", justifyContent: "center", border: "none", background: "transparent", cursor: "pointer", color: "inherit", flexShrink: 0, opacity: 0.7 }}>
                   <MoreHorizontal size={10} />
                 </button>
               </>
-            )}
-
-            {folderMenuId === folder.id && (
-              <div style={{ position: "absolute", right: 0, top: "100%", zIndex: 100, background: "#fff", border: "1px solid var(--line)", borderRadius: 6, boxShadow: "0 4px 12px rgba(0,0,0,.14)", minWidth: 140, padding: "4px 0" }}>
-                <button type="button" style={treeMenuItemSt} onClick={() => { setAddingParentId(folder.id); setNewFolderName(""); setExpandedIds(p => new Set([...p, folder.id])); setFolderMenuId(null); }}>
-                  サブフォルダ作成
-                </button>
-                <button type="button" style={treeMenuItemSt} onClick={() => { setEditingFolderId(folder.id); setEditingFolderName(folder.name); setFolderMenuId(null); }}>
-                  名前を変更
-                </button>
-                <button type="button" style={{ ...treeMenuItemSt, color: "#c0392b" }} onClick={() => deleteFolder(folder.id)}>
-                  削除
-                </button>
-              </div>
             )}
           </div>
 
@@ -797,8 +820,10 @@ export function FileRepositoryManager() {
               </button>
               {pickerFolders.map(({ id, name, depth }) => (
                 <button key={id} type="button" onClick={() => setDestFolderId(id)}
-                  style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 6, background: destFolderId === id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: destFolderId === id ? "var(--navy)" : "var(--ink-soft)", fontWeight: destFolderId === id ? 600 : 400 }}>
-                  <Folder size={12} />{name}
+                  style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 5, background: destFolderId === id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: destFolderId === id ? "var(--navy)" : "var(--ink-soft)", fontWeight: destFolderId === id ? 600 : 400 }}>
+                  {depth > 0 && <span style={{ color: "var(--ink-muted)", fontSize: 11, flexShrink: 0 }}>└</span>}
+                  <Folder size={12} style={{ flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
                 </button>
               ))}
             </div>
@@ -877,7 +902,8 @@ export function FileRepositoryManager() {
               <div style={{ flex: 1, overflowY: "auto", padding: "10px 6px" }}>
                 {/* Root entry */}
                 <div
-                  onClick={() => { setSelectedFolderId(null); setFolderMenuId(null); }}
+                  onClick={() => { setSelectedFolderId(null); setFolderMenu(null); }}
+                  onContextMenu={e => openFolderMenu(e, null)}
                   style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 8px", borderRadius: 6, cursor: "pointer", marginBottom: 2, background: dropTargetId === "__root__" ? "var(--navy)" : selectedFolderId === null ? "var(--navy-tint)" : "transparent", color: dropTargetId === "__root__" ? "#fff" : selectedFolderId === null ? "var(--navy-deep)" : "var(--ink-soft)", fontWeight: selectedFolderId === null ? 600 : 500, fontSize: 12.5, letterSpacing: "0.02em" }}
                   onMouseEnter={e => { if (selectedFolderId !== null && dropTargetId !== "__root__") e.currentTarget.style.background = "var(--navy-tint-soft)"; }}
                   onMouseLeave={e => { if (selectedFolderId !== null && dropTargetId !== "__root__") e.currentTarget.style.background = "transparent"; }}
@@ -891,7 +917,7 @@ export function FileRepositoryManager() {
               </div>
               <div style={{ padding: 8, borderTop: "1px solid var(--line)", flexShrink: 0 }}>
                 <button type="button"
-                  onClick={() => { setAddingParentId(null); setNewFolderName(""); }}
+                  onClick={() => startAddingUnder(null)}
                   style={{ width: "100%", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", border: "1px dashed var(--line)", borderRadius: 6, background: "transparent", cursor: "pointer", color: "var(--ink-soft)", fontSize: 12 }}>
                   <Plus size={12} />フォルダ作成
                 </button>
@@ -914,6 +940,7 @@ export function FileRepositoryManager() {
                   onSelectFolder={id => { setSelectedFolderId(id); setExpandedIds(p => new Set([...p, id])); }}
                   onRenameFolder={renameFolder}
                   onDeleteFolder={deleteFolder}
+                  onFolderContextMenu={openFolderMenu}
                   drag={dragCtx}
                   onOpenSummary={openOrCreateSummary}
                   onDetail={openDetail}
@@ -930,6 +957,34 @@ export function FileRepositoryManager() {
           </div>
         </section>
       </div>
+
+      {/* 右クリックメニュー（カーソル位置に固定表示） */}
+      {folderMenu && (
+        <div
+          onClick={e => e.stopPropagation()}
+          onContextMenu={e => e.preventDefault()}
+          style={{
+            position: "fixed", left: folderMenu.x, top: folderMenu.y, zIndex: 200,
+            background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 6,
+            boxShadow: "0 4px 14px rgba(0,0,0,.16)", minWidth: 160, padding: "4px 0",
+          }}
+        >
+          <button type="button" style={treeMenuItemSt} onClick={() => startAddingUnder(folderMenu.folder?.id ?? null)}>
+            {folderMenu.folder ? "サブフォルダ作成" : "フォルダ作成"}
+          </button>
+          {folderMenu.folder && (
+            <>
+              <button type="button" style={treeMenuItemSt} onClick={() => startRenamingFolder(folderMenu.folder!)}>
+                名前を変更
+              </button>
+              <div style={{ height: 1, background: "var(--line-soft)", margin: "4px 0" }} />
+              <button type="button" style={{ ...treeMenuItemSt, color: "#c0392b" }} onClick={() => deleteFolder(folderMenu.folder!.id)}>
+                削除
+              </button>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Overlays */}
       {selectedDetail && detailDraft ? (
@@ -964,7 +1019,7 @@ const saveMenuItemSt: React.CSSProperties = {
 
 // ── Folder content view ──────────────────────────────────────────
 function FolderContentView({
-  subFolders, allFolders, files, assignments, onSelectFolder, onRenameFolder, onDeleteFolder,
+  subFolders, allFolders, files, assignments, onSelectFolder, onRenameFolder, onDeleteFolder, onFolderContextMenu,
   drag, onOpenSummary, onDetail, onDelete, onProcessImages,
   summaryProcessingId, blockedSummaryId, deletingId, isLoadingFiles, selectedFolderId,
 }: {
@@ -973,6 +1028,7 @@ function FolderContentView({
   onSelectFolder: (id: string) => void;
   onRenameFolder: (id: string, name: string) => void;
   onDeleteFolder: (id: string) => void;
+  onFolderContextMenu: (e: React.MouseEvent, folder: RepoFolder) => void;
   drag: DragCtx; onOpenSummary: (f: RepositoryFile) => void; onDetail: (f: RepositoryFile) => void;
   onDelete: (f: RepositoryFile) => void; onProcessImages: (f: RepositoryFile) => void;
   summaryProcessingId: string | null; blockedSummaryId: string | null; deletingId: string | null;
@@ -1021,6 +1077,7 @@ function FolderContentView({
                   onClick={() => onSelectFolder(folder.id)}
                   onRename={name => onRenameFolder(folder.id, name)}
                   onDelete={() => onDeleteFolder(folder.id)}
+                  onContextMenu={e => onFolderContextMenu(e, folder)}
                   onDragOver={e => { e.preventDefault(); drag.setDropTargetId(folder.id); }}
                   onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) drag.setDropTargetId(null); }}
                   onDrop={e => {
@@ -1049,9 +1106,10 @@ function FolderContentView({
 }
 
 // ── Repo folder card ─────────────────────────────────────────────
-function RepoFolderCard({ folder, fileCount, isDropTarget, isDragging, onClick, onRename, onDelete, onDragOver, onDragLeave, onDrop }: {
+function RepoFolderCard({ folder, fileCount, isDropTarget, isDragging, onClick, onRename, onDelete, onContextMenu, onDragOver, onDragLeave, onDrop }: {
   folder: RepoFolder; fileCount: number; isDropTarget: boolean; isDragging: boolean;
   onClick: () => void; onRename: (name: string) => void; onDelete: () => void;
+  onContextMenu?: (e: React.MouseEvent) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDragLeave: (e: React.DragEvent) => void;
   onDrop: (e: React.DragEvent) => void;
@@ -1069,6 +1127,7 @@ function RepoFolderCard({ folder, fileCount, isDropTarget, isDragging, onClick, 
   return (
     <div
       onClick={() => !renaming && onClick()}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       onDragOver={onDragOver}
@@ -1390,8 +1449,10 @@ function DetailOverlay({ file, draft, saving, folders, onDraft, onSave, onOpenSo
             </button>
             {pickerFolders.map(({ id, name, depth }) => (
               <button key={id} type="button" onClick={() => onDraft(cur => cur ? { ...cur, folderId: id } : cur)}
-                style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 6, background: draft.folderId === id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: draft.folderId === id ? "var(--navy)" : "var(--ink-soft)", fontWeight: draft.folderId === id ? 600 : 400 }}>
-                <Folder size={12} />{name}
+                style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", display: "flex", alignItems: "center", gap: 5, background: draft.folderId === id ? "var(--navy-tint-soft)" : "transparent", cursor: "pointer", color: draft.folderId === id ? "var(--navy)" : "var(--ink-soft)", fontWeight: draft.folderId === id ? 600 : 400 }}>
+                {depth > 0 && <span style={{ color: "var(--ink-muted)", fontSize: 11, flexShrink: 0 }}>└</span>}
+                <Folder size={12} style={{ flexShrink: 0 }} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{name}</span>
               </button>
             ))}
           </div>
