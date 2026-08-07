@@ -5,7 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   Check, ChevronDown, ChevronRight, Clipboard, Download, Edit,
-  ExternalLink, Folder, FolderOpen, Images, MoreHorizontal, Plus,
+  ExternalLink, Folder, FolderOpen, Images, MoreHorizontal, Pencil, Plus,
   RefreshCw, Search, Trash2, Upload, X,
 } from "lucide-react";
 import { Button, FileSpine, FieldLabel } from "@/components/ui";
@@ -1148,8 +1148,13 @@ function RepoFolderCard({ folder, fileCount, isDropTarget, isDragging, onClick, 
     >
       {/* Actions */}
       <div onClick={e => e.stopPropagation()} style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 2, opacity: hover && !renaming ? 1 : 0, transition: "opacity .15s ease", background: "var(--panel)", borderRadius: 6, padding: 2, border: "1px solid var(--line)" }}>
-        <SmallIconButton title="名前を変更" onClick={() => { setDraft(folder.name); setRenaming(true); }}><Edit size={12} /></SmallIconButton>
-        <SmallIconButton title="削除" onClick={onDelete} danger><Trash2 size={12} /></SmallIconButton>
+        <button type="button" className="btn ghost sm icon" title="名前を変更"
+          onClick={() => { setDraft(folder.name); setRenaming(true); }}>
+          <Pencil size={12} aria-hidden="true" />
+        </button>
+        <button type="button" className="btn ghost sm icon" title="削除" onClick={onDelete}>
+          <Trash2 size={12} aria-hidden="true" />
+        </button>
       </div>
 
       <FolderGlyph open={hover || isDropTarget} />
@@ -1280,17 +1285,6 @@ function FolderGlyph({ open }: { open: boolean }) {
         fill="var(--navy-tint-soft)"
       />
     </svg>
-  );
-}
-
-function SmallIconButton({ children, onClick, title, danger }: { children: React.ReactNode; onClick: () => void; title: string; danger?: boolean }) {
-  return (
-    <button type="button" onClick={onClick} title={title}
-      style={{ width: 22, height: 22, borderRadius: 4, border: 0, background: "transparent", color: danger ? "#8a3a2d" : "var(--ink-soft)", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center" }}
-      onMouseEnter={e => { e.currentTarget.style.background = danger ? "#f3e3df" : "var(--navy-tint-soft)"; e.currentTarget.style.color = danger ? "#7a2d22" : "var(--navy-deep)"; }}
-      onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = danger ? "#8a3a2d" : "var(--ink-soft)"; }}>
-      {children}
-    </button>
   );
 }
 
