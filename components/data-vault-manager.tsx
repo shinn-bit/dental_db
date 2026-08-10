@@ -266,7 +266,11 @@ export function DataVaultManager() {
     setMenu(null);
     setNewFolderName("");
     setAddingParentId(parentId);
-    if (parentId) setExpandedIds(prev => new Set([...prev, parentId]));
+    // 入力欄はサイドバーのツリー内に出るので、祖先まで開いて必ず見えるようにする
+    if (parentId) {
+      const chain = getAncestors(catalog.folders, parentId).map(f => f.id);
+      setExpandedIds(prev => new Set([...prev, ...chain]));
+    }
   }
 
   function startRenaming(folder: VaultFolder) {
@@ -622,12 +626,9 @@ export function DataVaultManager() {
 
             {/* Content */}
             <div
-              onContextMenu={e => {
-                // 空白部分の右クリック → 表示中フォルダの直下に作成
-                if (e.target === e.currentTarget) {
-                  openMenu(e, catalog.folders.find(f => f.id === selectedFolderId) ?? null);
-                }
-              }}
+              // 一覧の余白を右クリック → 表示中フォルダの直下にサブフォルダ作成
+              // （フォルダカード上の右クリックはカード側で stopPropagation 済み）
+              onContextMenu={e => openMenu(e, catalog.folders.find(f => f.id === selectedFolderId) ?? null)}
               style={{ overflowY: "auto", padding: 20, paddingBottom: selectedDocuments.length ? 84 : 20 }}
             >
               {loading ? (

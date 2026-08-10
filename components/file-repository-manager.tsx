@@ -102,6 +102,39 @@ function writeAssignments(a: FileAssignments) {
   try { localStorage.setItem(ASSIGNMENTS_KEY, JSON.stringify(a)); } catch {}
 }
 
+// ── 標準サブフォルダの一括作成（初回のみ） ───────────────────────
+const STANDARD_SUBFOLDERS = ["書籍", "完成", "セミナー資料"];
+const STANDARD_SUBFOLDERS_KEY = "dental-repo-standard-subfolders-v1";
+
+/**
+ * 資料庫のトップレベルフォルダそれぞれに標準サブフォルダを一度だけ作る。
+ * フォルダ構成はlocalStorage管理なので、端末ごとに初回表示時に適用する。
+ * 同名のサブフォルダが既にある場合は作らない。
+ */
+function ensureStandardSubfolders(folders: RepoFolder[]): RepoFolder[] {
+  try {
+    if (localStorage.getItem(STANDARD_SUBFOLDERS_KEY)) return folders;
+  } catch { return folders; }
+
+  const tops = folders.filter(f => f.parentId === null);
+  // フォルダがまだ1つも無い端末では適用済みフラグを立てない（後で作った時に適用する）
+  if (!tops.length) return folders;
+
+  const added: RepoFolder[] = [];
+  for (const top of tops) {
+    const existing = new Set(folders.filter(f => f.parentId === top.id).map(f => f.name));
+    for (const name of STANDARD_SUBFOLDERS) {
+      if (existing.has(name)) continue;
+      added.push({ id: `f-std${added.length}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name, parentId: top.id });
+    }
+  }
+
+  const next = added.length ? [...folders, ...added] : folders;
+  if (added.length) writeFolders(next);
+  try { localStorage.setItem(STANDARD_SUBFOLDERS_KEY, "1"); } catch {}
+  return next;
+}
+
 // ── Folder helpers ───────────────────────────────────────────────
 function collectDescendants(folders: RepoFolder[], id: string): Set<string> {
   const s = new Set<string>();
@@ -169,7 +202,7 @@ export function FileRepositoryManager() {
 
   // Load from localStorage on mount
   useEffect(() => {
-    setFoldersState(readFolders());
+    setFoldersState(ensureStandardSubfolders(readFolders()));
     setAssignmentsState(readAssignments());
   }, []);
 
@@ -207,7 +240,11 @@ export function FileRepositoryManager() {
     setFolderMenu(null);
     setNewFolderName("");
     setAddingParentId(parentId);
-    if (parentId) setExpandedIds(prev => new Set([...prev, parentId]));
+    // 入力欄はサイドバーのツリー内に出るので、祖先まで開いて必ず見えるようにする
+    if (parentId) {
+      const chain = getAncestors(folders, parentId).map(f => f.id);
+      setExpandedIds(prev => new Set([...prev, ...chain]));
+    }
   }
 
   function startRenamingFolder(folder: RepoFolder) {
@@ -925,7 +962,15 @@ export function FileRepositoryManager() {
             </div>
 
             {/* Content area */}
-            <div style={{ overflowY: "auto", minHeight: 0 }}>
+            <div
+              // 一覧の余白を右クリック → 表示中フォルダの直下にサブフォルダ作成
+              // （フォルダカード上の右クリックはカード側で stopPropagation 済み）
+              onContextMenu={e => {
+                if (searching) return;
+                openFolderMenu(e, folders.find(f => f.id === selectedFolderId) ?? null);
+              }}
+              style={{ overflowY: "auto", minHeight: 0 }}
+            >
               {searching ? (
                 <SearchResults hits={searchHits} query={libQuery}
                   onOpenSummary={openOrCreateSummary} onDetail={openDetail} onDelete={deleteFile}

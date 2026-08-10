@@ -66,19 +66,40 @@ type UploadQueue = {
 type SessionSummary = { id: string; title: string; type?: "chat" | "manual" | "document" | "slide" | "insurance" };
 type RepoFolder = { id: string; name: string; parentId: string | null };
 
-function flattenFoldersForPicker(
-  folders: RepoFolder[],
-  parentId: string | null,
-  depth: number
-): { id: string; name: string; depth: number }[] {
-  const result: { id: string; name: string; depth: number }[] = [];
-  folders
-    .filter(f => f.parentId === parentId)
-    .forEach(f => {
-      result.push({ id: f.id, name: f.name, depth });
-      result.push(...flattenFoldersForPicker(folders, f.id, depth + 1));
-    });
-  return result;
+// ── 資料庫の「完成」フォルダへの保存 ──────────────────────────────────────────
+// 資料庫のフォルダ構成は localStorage 管理（components/file-repository-manager.tsx と同じキー）
+const REPO_FOLDERS_KEY = "dental-repo-folders-v2";
+const DONE_FOLDER_NAME = "完成";
+
+function readRepoFolders(): RepoFolder[] {
+  try {
+    const raw = localStorage.getItem(REPO_FOLDERS_KEY);
+    return raw ? (JSON.parse(raw) as RepoFolder[]) : [];
+  } catch { return []; }
+}
+
+/**
+ * 指定したトップレベルフォルダ直下の「完成」フォルダIDを返す。
+ * 無ければその場で作成する（資料庫側で後からフォルダを追加した場合の保険）。
+ */
+function resolveDoneFolderId(topFolderId: string): string {
+  const folders = readRepoFolders();
+  const existing = folders.find(f => f.parentId === topFolderId && f.name === DONE_FOLDER_NAME);
+  if (existing) return existing.id;
+
+  const id = `f-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  try {
+    localStorage.setItem(
+      REPO_FOLDERS_KEY,
+      JSON.stringify([...folders, { id, name: DONE_FOLDER_NAME, parentId: topFolderId }])
+    );
+  } catch { /* 保存できなくてもアップロード自体は続行する */ }
+  return id;
+}
+
+/** ファイル名に使えない文字を落とす */
+function sanitizeFileName(name: string): string {
+  return name.replace(/[\\/:*?"<>|]/g, "_").trim() || "解説書";
 }
 
 // ── Gemini API helpers ────────────────────────────────────────────────────────
@@ -512,10 +533,9 @@ const chipStyle = (active: boolean): React.CSSProperties => ({
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRepoItemId }: {
+export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
   onSwitchMode?: () => void;
   initialSessionId?: string | null;
-  initialRepoItemId?: string | null;
 }) {
   const [messages, setMessages] = useState<ManualMessage[]>([]);
   const [input, setInput] = useState("");
@@ -540,8 +560,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
   const [docMode, setDocMode] = useState<"summary" | "procedure" | "free">("summary");
   const [editSelectedSlides, setEditSelectedSlides] = useState<number[]>([]);
 
-  // 保管庫
-  const [repoItemId, setRepoItemId] = useState<string | null>(initialRepoItemId ?? null);
+  // 資料庫の「完成」フォルダへの保存
   const [showSaveModal, setShowSaveModal] = useState(false);
   const [repoFolders, setRepoFolders] = useState<RepoFolder[]>([]);
   const [saveTitle, setSaveTitle] = useState("");
@@ -736,7 +755,6 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
     setDocMode("summary");
-    setRepoItemId(null);
     embedCounterRef.current = 0;
     setActiveTab("chat");
   }
@@ -825,7 +843,6 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         setOutputType(session.outputType ?? "word");
         setGeneratedTheme(session.generatedTheme ?? "");
         setDocMode(session.docMode ?? "summary");
-        if (!initialRepoItemId) setRepoItemId(null);
 
         const restoredMsgs: ManualMessage[] = await Promise.all(
           (session.messages ?? []).map(async msg => {
@@ -859,44 +876,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
         setMessages(restoredMsgs);
         setNotice("");
       } catch {
-        // Session not found — try content snapshot from 保管庫
-        if (initialRepoItemId) {
-          try {
-            const snapRes = await fetch("/api/manual-repository", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ action: "get-content", itemId: initialRepoItemId }),
-            });
-            if (snapRes.ok) {
-              const snap = await snapRes.json() as {
-                outputType?: "word" | "slide";
-                docMode?: "summary" | "procedure" | "free";
-                content?: string; slidesHtml?: string[]; generatedTheme?: string;
-              };
-              setContent(snap.content ?? "");
-              setSlidesHtml(snap.slidesHtml ?? []);
-              setGeneratedOutputType(snap.outputType ?? "word");
-              setOutputType(snap.outputType ?? "word");
-              setGeneratedTheme(snap.generatedTheme ?? "");
-              setDocMode(snap.docMode ?? "summary");
-              // Create new session so further edits are saved fresh
-              sessionIdRef.current = crypto.randomUUID();
-              setCurrentSessionId(null);
-              setMessages([{
-                role: "model",
-                text: "チャット履歴が見つかりませんでしたが、保管庫の保存データからコンテンツを復元しました。続きの編集ができます。",
-                displayText: "✓ 保管庫のスナップショットから復元しました。チャット履歴は失われていますがコンテンツは復元済みです。",
-              }]);
-              setNotice("");
-            } else {
-              setNotice("セッションも保管庫のスナップショットも見つかりませんでした。");
-            }
-          } catch {
-            setNotice("セッションの読み込みに失敗しました");
-          }
-        } else {
-          setNotice("セッションの読み込みに失敗しました");
-        }
+        setNotice("セッションの読み込みに失敗しました");
       } finally {
         setLoading(false);
       }
@@ -921,7 +901,6 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
       setOutputType(session.outputType ?? "word");
       setGeneratedTheme(session.generatedTheme ?? "");
       setDocMode(session.docMode ?? "summary");
-      setRepoItemId(null);
       setEditSelectedSlides([]);
       embedCounterRef.current = 0;
       const restoredMsgs: ManualMessage[] = await Promise.all(
@@ -999,82 +978,87 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
     }));
   }
 
-  // ── 保管庫への保存 ────────────────────────────────────────────────────────
+  // ── 資料庫の「完成」フォルダへの保存 ──────────────────────────────────────
 
-  async function openSaveModal() {
+  function openSaveModal() {
     setSaveTitle(generatedTheme || "");
     setSaveFolderId(null);
     setSaveError(null);
+    // 資料庫のトップレベルフォルダ（1_カリエス 等）を保存先候補にする
+    setRepoFolders(readRepoFolders().filter(f => f.parentId === null));
     setShowSaveModal(true);
-    try {
-      const data = await fetch("/api/manual-repository").then(r => r.json()) as { folders: RepoFolder[] };
-      setRepoFolders(data.folders ?? []);
-    } catch {
-      // フォルダ取得失敗時はルート保存のみ可能
-    }
   }
 
-  async function saveToRepository() {
-    if (!saveTitle.trim() || saving) return;
+  /** 現在の成果物を .docx / .pptx の Blob にする */
+  async function buildOutputBlob(): Promise<{ blob: Blob; extension: string; contentType: string }> {
+    if (generatedOutputType === "slide") {
+      if (!slidesHtml.length) throw new Error("保存できるスライドがありません");
+      return {
+        blob: await buildPptxBlob(),
+        extension: "pptx",
+        contentType: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      };
+    }
+    if (!content) throw new Error("保存できる本文がありません");
+    const res = await fetch("/api/generate-manual/docx", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content, theme: saveTitle.trim() || generatedTheme, images: getEmbeddedImages() }),
+    });
+    if (!res.ok) throw new Error(`docx 生成エラー ${res.status}`);
+    return {
+      blob: await res.blob(),
+      extension: "docx",
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+  }
+
+  /** 成果物を資料庫にアップロードし、選んだフォルダの「完成」サブフォルダに入れる */
+  async function saveToDoneFolder() {
+    if (!saveTitle.trim() || !saveFolderId || saving) return;
     setSaving(true);
     setSaveError(null);
     try {
-      let targetItemId: string | null = repoItemId;
-      if (repoItemId) {
-        const res = await fetch("/api/manual-repository", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "overwrite-item",
-            id: repoItemId,
-            ...(generatedOutputType === "slide" && slidesHtml[0] ? { firstSlideHtml: slidesHtml[0] } : {}),
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({})) as { error?: string };
-          throw new Error(err.error ?? `HTTP ${res.status}`);
-        }
-      } else {
-        const res = await fetch("/api/manual-repository", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "save-item",
-            item: {
-              title: saveTitle.trim(),
-              folderId: saveFolderId,
-              sessionId: currentSessionId ?? sessionIdRef.current,
-              type: generatedOutputType,
-              docMode,
-              ...(generatedOutputType === "slide" && slidesHtml[0] ? { firstSlideHtml: slidesHtml[0] } : {}),
-            },
-          }),
-        });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({})) as { error?: string };
-          throw new Error(err.error ?? `HTTP ${res.status}`);
-        }
-        const data = await res.json() as { id: string };
-        setRepoItemId(data.id);
-        targetItemId = data.id;
+      const { blob, extension, contentType } = await buildOutputBlob();
+      const fileName = `${sanitizeFileName(saveTitle)}.${extension}`;
+      const doneFolderId = resolveDoneFolderId(saveFolderId);
+
+      const urlRes = await fetch("/api/upload-url", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fileName, contentType }),
+      });
+      if (!urlRes.ok) throw new Error(`アップロードURLの取得に失敗しました (${urlRes.status})`);
+      const { id, uploadUrl, s3Key } = await urlRes.json() as { id: string; uploadUrl: string; s3Key: string };
+
+      const putRes = await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": contentType },
+        body: blob,
+      });
+      if (!putRes.ok) throw new Error(`アップロードに失敗しました (${putRes.status})`);
+
+      const metaRes = await fetch("/api/files", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id, fileName, s3Key, contentType,
+          size: blob.size,
+          folderId: doneFolderId,
+          memo: "解説書作成から保存",
+          uploadedAt: new Date().toISOString(),
+        }),
+      });
+      if (!metaRes.ok) {
+        const err = await metaRes.json().catch(() => ({})) as { error?: string };
+        throw new Error(err.error ?? `保存に失敗しました (${metaRes.status})`);
       }
 
-      // Save content snapshot so the document can be restored even if the chat session is deleted
-      if (targetItemId) {
-        await fetch("/api/manual-repository", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "save-content",
-            itemId: targetItemId,
-            content: { outputType: generatedOutputType, docMode, content, slidesHtml, generatedTheme },
-          }),
-        }).catch(() => {}); // snapshot failure is non-fatal
-      }
-
+      const folderName = repoFolders.find(f => f.id === saveFolderId)?.name ?? "";
+      const message = `✓ ${folderName} › ${DONE_FOLDER_NAME} に保存しました`;
       setShowSaveModal(false);
-      setNotice("✓ 保管庫に保存しました");
-      window.setTimeout(() => setNotice(n => n === "✓ 保管庫に保存しました" ? "" : n), 2500);
+      setNotice(message);
+      window.setTimeout(() => setNotice(n => n === message ? "" : n), 3000);
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : "保存に失敗しました");
     } finally {
@@ -2086,7 +2070,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
                 style={{ gap: 5, fontSize: 12, paddingLeft: 12, paddingRight: 12, height: 30 }}
               >
                 <Archive size={13} aria-hidden="true" />
-                {repoItemId ? "上書き保存" : "保管庫に保存"}
+                完成フォルダに保存
               </Button>
             ) : null}
             {!loading && generatedOutputType === "word" && content ? (
@@ -2180,8 +2164,13 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
           style={{ background: "#fff", borderRadius: 16, padding: 24, width: 400, maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}
           onClick={e => e.stopPropagation()}
         >
-          <p style={{ margin: "0 0 16px", fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>
-            {repoItemId ? "上書き保存" : "保管庫に保存"}
+          <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 16, color: "var(--ink)" }}>
+            完成フォルダに保存
+          </p>
+          <p style={{ margin: "0 0 16px", fontSize: 12, color: "var(--ink-muted)", lineHeight: 1.6 }}>
+            選んだ資料庫フォルダの「{DONE_FOLDER_NAME}」に
+            {generatedOutputType === "slide" ? "PowerPoint (.pptx)" : "Word (.docx)"}
+            として保存します。
           </p>
           {saveError ? (
             <p style={{ margin: "0 0 12px", fontSize: 12, color: "#c53030", background: "#fff5f5", border: "1px solid #feb2b2", borderRadius: 6, padding: "8px 10px", lineHeight: 1.5 }}>
@@ -2189,52 +2178,42 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
             </p>
           ) : null}
 
-          {/* タイトル */}
+          {/* 保存先フォルダ（資料庫のトップレベル） */}
           <label style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4, display: "block", letterSpacing: "0.06em" }}>
-            タイトル
+            保存先フォルダ
+          </label>
+          <div style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden auto", maxHeight: 200, marginBottom: 16 }}>
+            {repoFolders.length === 0 ? (
+              <p style={{ margin: 0, padding: "12px", fontSize: 12, color: "var(--ink-muted)", lineHeight: 1.6 }}>
+                資料庫にフォルダがありません。先に資料庫でフォルダを作成してください。
+              </p>
+            ) : repoFolders.map(folder => (
+              <button
+                key={folder.id}
+                type="button"
+                onClick={() => setSaveFolderId(folder.id)}
+                style={{ width: "100%", textAlign: "left", padding: "7px 12px", fontSize: 12, border: "none", background: saveFolderId === folder.id ? "var(--navy-tint-soft, #eef2f8)" : "transparent", cursor: "pointer", color: saveFolderId === folder.id ? "var(--navy)" : "var(--ink-soft)", display: "flex", alignItems: "center", gap: 6, fontWeight: saveFolderId === folder.id ? 600 : 400 }}
+              >
+                <Folder size={12} />
+                {folder.name}
+                <span style={{ marginLeft: "auto", color: "var(--ink-muted)", fontSize: 11 }}>
+                  › {DONE_FOLDER_NAME}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* ファイル名 */}
+          <label style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4, display: "block", letterSpacing: "0.06em" }}>
+            ファイル名
           </label>
           <input
             className="input"
             value={saveTitle}
             onChange={e => setSaveTitle(e.target.value)}
-            onKeyDown={e => { if (e.key === "Enter") saveToRepository(); }}
+            onKeyDown={e => { if (e.key === "Enter") void saveToDoneFolder(); }}
             style={{ marginBottom: 16, height: 36 }}
           />
-
-          {/* フォルダ選択（新規保存時のみ） */}
-          {!repoItemId ? (
-            <>
-              <label style={{ fontSize: 12, color: "var(--ink-soft)", marginBottom: 4, display: "block", letterSpacing: "0.06em" }}>
-                保存先フォルダ
-              </label>
-              <div style={{ border: "1px solid var(--line)", borderRadius: 8, overflow: "hidden auto", maxHeight: 200, marginBottom: 16 }}>
-                {/* Root option */}
-                <button
-                  type="button"
-                  onClick={() => setSaveFolderId(null)}
-                  style={{ width: "100%", textAlign: "left", padding: "7px 12px", fontSize: 12, border: "none", background: saveFolderId === null ? "var(--navy-tint-soft, #eef2f8)" : "transparent", cursor: "pointer", color: saveFolderId === null ? "var(--navy)" : "var(--ink-soft)", display: "flex", alignItems: "center", gap: 6, fontWeight: saveFolderId === null ? 600 : 400 }}
-                >
-                  <Folder size={12} />
-                  ルート（フォルダなし）
-                </button>
-                {flattenFoldersForPicker(repoFolders, null, 0).map(({ id, name, depth }) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => setSaveFolderId(id)}
-                    style={{ width: "100%", textAlign: "left", paddingTop: 7, paddingBottom: 7, paddingLeft: 12 + depth * 14, paddingRight: 12, fontSize: 12, border: "none", background: saveFolderId === id ? "var(--navy-tint-soft, #eef2f8)" : "transparent", cursor: "pointer", color: saveFolderId === id ? "var(--navy)" : "var(--ink-soft)", display: "flex", alignItems: "center", gap: 6, fontWeight: saveFolderId === id ? 600 : 400 }}
-                  >
-                    <Folder size={12} />
-                    {name}
-                  </button>
-                ))}
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: 12, color: "var(--ink-muted)", marginBottom: 16, lineHeight: 1.6 }}>
-              既存の保管庫エントリを最新の内容で更新します。
-            </p>
-          )}
 
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button
@@ -2246,11 +2225,11 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId, initialRe
             </button>
             <button
               type="button"
-              onClick={saveToRepository}
-              disabled={saving || !saveTitle.trim()}
-              style={{ padding: "8px 18px", fontSize: 13, border: "none", borderRadius: "var(--radius)", background: "var(--navy)", cursor: saving ? "default" : "pointer", color: "#fff", fontWeight: 600, opacity: saving || !saveTitle.trim() ? 0.6 : 1 }}
+              onClick={() => void saveToDoneFolder()}
+              disabled={saving || !saveTitle.trim() || !saveFolderId}
+              style={{ padding: "8px 18px", fontSize: 13, border: "none", borderRadius: "var(--radius)", background: "var(--navy)", cursor: saving ? "default" : "pointer", color: "#fff", fontWeight: 600, opacity: saving || !saveTitle.trim() || !saveFolderId ? 0.6 : 1 }}
             >
-              {saving ? "保存中…" : repoItemId ? "上書き保存" : "保存"}
+              {saving ? "保存中…" : "保存"}
             </button>
           </div>
         </div>

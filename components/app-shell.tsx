@@ -10,7 +10,6 @@ const navItems = [
   { href: "/repository", label: "資料庫" },
   { href: "/manual", label: "解説書作成" },
   { href: "/insurance", label: "保険請求" },
-  { href: "/manual-repository", label: "保管庫" },
   { href: "/data-vault", label: "データ保管庫" },
 ];
 

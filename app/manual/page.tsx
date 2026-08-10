@@ -8,14 +8,12 @@ function ManualContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionId = searchParams.get("sessionId");
-  const repoItemId = searchParams.get("repoItemId");
 
   return (
     <div style={{ flex: 1, display: "flex", alignItems: "stretch", minHeight: 0 }}>
       <ManualGeneratorPanel
         onSwitchMode={() => router.push("/")}
         initialSessionId={sessionId}
-        initialRepoItemId={repoItemId}
       />
     </div>
   );

@@ -87,7 +87,22 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
     try {
       const raw = localStorage.getItem("dental-repo-folders-v2");
       const allFolders: { id: string; name: string; parentId: string | null }[] = raw ? JSON.parse(raw) : [];
-      setFolders(allFolders.map(f => ({ id: f.id, name: f.name })));
+      // サブフォルダは同名が並ぶ（書籍・完成など）ので、親からのパスを付けて区別できるようにする
+      const byId = new Map(allFolders.map(f => [f.id, f]));
+      const pathLabel = (f: { id: string; name: string; parentId: string | null }) => {
+        const parts = [f.name];
+        const seen = new Set([f.id]);
+        let cur = f.parentId;
+        while (cur && !seen.has(cur)) {
+          const parent = byId.get(cur);
+          if (!parent) break;
+          parts.unshift(parent.name);
+          seen.add(parent.id);
+          cur = parent.parentId;
+        }
+        return parts.join(" › ");
+      };
+      setFolders(allFolders.map(f => ({ id: f.id, name: pathLabel(f) })));
     } catch {}
   }, []);
 
