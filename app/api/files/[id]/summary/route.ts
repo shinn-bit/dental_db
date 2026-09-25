@@ -4,7 +4,6 @@ import { NextResponse } from "next/server";
 import { createS3Client, createStepFunctionsClient } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
 import {
-  createKnowledgeBaseS3Key,
   createMetadataS3Key,
   createSummaryS3Key,
   normalizeFileMetadata,
@@ -31,16 +30,6 @@ async function saveMetadata(metadata: StoredFileMetadata) {
       ContentType: "application/json; charset=utf-8"
     })
   );
-}
-
-function createKnowledgeBaseDocument(summary: string) {
-  const normalized = summary
-    .replace(/\r\n/g, "\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/[ \t]+/g, " ")
-    .trim();
-
-  return normalized;
 }
 
 function createExecutionName(fileId: string) {
@@ -150,20 +139,18 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const bucket = requireEnv(appEnv.s3BucketName, "S3_BUCKET_NAME");
   const metadata = await getMetadata(id);
   const summaryKey = metadata.summaryKey || createSummaryS3Key(id);
-  const knowledgeBaseKey = metadata.knowledgeBaseKey || createKnowledgeBaseS3Key(id);
   const nextMetadata: StoredFileMetadata = {
     ...metadata,
     summary,
     summaryStatus: "completed",
     summaryError: "",
     summaryKey,
-    knowledgeBaseKey,
     summaryUpdatedAt: new Date().toISOString(),
     summaryMode: "manual"
   };
 
+  // 要約は summaries/ にだけ保存する。kb/{id}.md（OCR全文＋画像説明）はRAG用なので上書きしない
   await putS3Text(bucket, summaryKey, summary, "text/markdown; charset=utf-8");
-  await putS3Text(bucket, knowledgeBaseKey, createKnowledgeBaseDocument(summary), "text/markdown; charset=utf-8");
   await saveMetadata(nextMetadata);
 
   return NextResponse.json({ summary, file: nextMetadata });

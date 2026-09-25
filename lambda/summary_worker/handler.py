@@ -271,13 +271,6 @@ def check_ocr(event):
     return {"fileId": event["fileId"], "ocrStatus": "SUCCEEDED"}
 
 
-def create_knowledge_base_document(summary):
-    normalized = "\n".join(line.rstrip() for line in summary.replace("\r\n", "\n").split("\n"))
-    while "\n\n\n" in normalized:
-        normalized = normalized.replace("\n\n\n", "\n\n")
-    return normalized.strip()
-
-
 def create_knowledge_base_document_from_text(metadata, text):
     normalized = "\n".join(line.rstrip() for line in text.replace("\r\n", "\n").split("\n")).strip()
     header = [
@@ -648,17 +641,15 @@ def generate_summary(event):
 
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     summary_s3_key = summary_key(file_id)
-    kb_s3_key = knowledge_base_key(file_id)
 
+    # 要約は summaries/{id}.md にだけ保存する。kb/{id}.md（OCR全文＋画像説明）はRAG用なので上書きしない
     put_text(bucket, summary_s3_key, summary, "text/markdown; charset=utf-8")
-    put_text(bucket, kb_s3_key, create_knowledge_base_document(summary), "text/markdown; charset=utf-8")
     metadata.update(
         {
             "summary": summary,
             "summaryStatus": "completed",
             "summaryError": "",
             "summaryKey": summary_s3_key,
-            "knowledgeBaseKey": kb_s3_key,
             "summaryUpdatedAt": now,
             "summaryMode": "section",
             "summaryChunkCount": len(materials) if materials else 1,
