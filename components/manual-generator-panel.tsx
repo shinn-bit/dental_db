@@ -323,11 +323,11 @@ const FREE_SYS_PROMPT = [
   "  修正時も既存の [IMAGE_N] マーカーを維持してください。",
 ].join("\n");
 
-const SLIDE_SYS_PROMPT = [
+// Word資料（病気の要約／手順作成／自由作成のいずれか）をスライド化する。構成は元のWordに従う
+const SLIDE_FROM_WORD_SYS_PROMPT = [
   "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
-  "ユーザーの指示に従い、歯科医院スタッフ向けプレゼンテーション（12枚）のHTMLスライドを生成してください。",
-  "修正指示がある場合は全スライドを再生成してください。",
-  "【出力形式】各スライドを ===SLIDE_N===（N=1〜12）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。",
+  "渡されたWord資料（Markdown）をもとに、歯科医院スタッフ向けプレゼンテーションのHTMLスライドを生成してください。",
+  "【出力形式】各スライドを ===SLIDE_N===（N=1から連番）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。",
   "画像の取り扱い:",
   "- 参考画像: 内容生成の参考としてください",
   "- 埋め込み画像IMAGE_N: NをそのままINDEXに使い <div data-image=\"INDEX\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入する。例: IMAGE_0 → data-image=\"0\"、IMAGE_1 → data-image=\"1\"",
@@ -341,20 +341,14 @@ const SLIDE_SYS_PROMPT = [
   "→ 同じ種類を連続して使わず、各スライドの内容に最も適したビジュアルを自律的に選ぶこと",
   "→ テキストの羅列にしないこと。必ず何らかのビジュアル要素を含める",
   "",
-  "【構成（必ず12枚・以下の順番を厳守）】",
-  "1枚目: タイトルスライド（ネイビー背景、テーマを大きく）",
-  "2枚目: 1. 病気の解説",
-  "3枚目: 2. 原因",
-  "4枚目: 3. 病態・所見",
-  "5枚目: 4. 患者の訴え・臨床所見",
-  "6枚目: 5. 当日の処置・応急処置",
-  "7枚目: 6. 治療法",
-  "8枚目: 7. 治療の具体的なステップ",
-  "9枚目: 8. 治療中に確認するチェックリスト（チェックボックス付き箇条書き形式）",
-  "10枚目: 9. 予後・術後のメンテナンス",
-  "11枚目: 10. その他注意すべきこと",
-  "12枚目: まとめ・重要ポイント",
-  "※各スライドの見出しには必ず上記の番号と項目名を含めること。構成を省略・並び替え・統合しないこと。",
+  "【構成（Word資料の見出し構成に従う）】",
+  "- 1枚目: タイトルスライド（ネイビー背景、Word資料のタイトル・テーマを大きく）",
+  "- 2枚目以降: Word資料の見出し（## ）ごとに、資料と同じ順番で1枚ずつ作る。内容が多い見出しは2枚に分けてよい",
+  "- 最後の1枚: まとめ・重要ポイント",
+  "- 各スライドの見出しには、Word資料の見出し（番号があれば番号も）をそのまま使う",
+  "- Word資料にない項目・見出しを追加しないこと。見出しの省略・並び替えもしないこと",
+  "- 内容はWord資料に書かれていることだけを使う。新しい情報を付け足さないこと",
+  "- Word資料のチェックリスト（- [ ] ）はチェックボックス付きで、表はHTMLテーブルで表現する",
 ].join("\n");
 
 const SLIDE_EDIT_SYS_PROMPT = [
@@ -389,36 +383,6 @@ function buildSlideRegenSysPrompt(currentCount: number): string {
 
 // ── Slide batch generation ────────────────────────────────────────────────────
 
-const SLIDE_BATCH_DEFS = [
-  {
-    range: "1〜4",
-    sections: [
-      "===SLIDE_1===: タイトルスライド（ネイビー背景、テーマを大きく）",
-      "===SLIDE_2===: 1. 病気の解説",
-      "===SLIDE_3===: 2. 原因",
-      "===SLIDE_4===: 3. 病態・所見",
-    ],
-  },
-  {
-    range: "5〜8",
-    sections: [
-      "===SLIDE_5===: 4. 患者の訴え・臨床所見",
-      "===SLIDE_6===: 5. 当日の処置・応急処置",
-      "===SLIDE_7===: 6. 治療法",
-      "===SLIDE_8===: 7. 治療の具体的なステップ",
-    ],
-  },
-  {
-    range: "9〜12",
-    sections: [
-      "===SLIDE_9===:  8. 治療中に確認するチェックリスト（チェックボックス付き）",
-      "===SLIDE_10===: 9. 予後・術後のメンテナンス",
-      "===SLIDE_11===: 10. その他注意すべきこと",
-      "===SLIDE_12===: まとめ・重要ポイント",
-    ],
-  },
-];
-
 const SLIDE_BATCH_BASE_LINES = [
   "【各スライドの仕様】",
   ...SLIDE_SPEC_LINES,
@@ -429,26 +393,6 @@ const SLIDE_BATCH_BASE_LINES = [
   "→ 同じ種類を連続して使わず、各スライドの内容に最も適したビジュアルを自律的に選ぶこと",
   "→ テキストの羅列にしないこと。必ず何らかのビジュアル要素を含める",
 ];
-
-function buildInitialBatchSysPrompt(batchIndex: number): string {
-  const { range, sections } = SLIDE_BATCH_DEFS[batchIndex];
-  const startN = batchIndex * 4 + 1;
-  const endN = startN + 3;
-  return [
-    "あなたは視覚表現に優れたUIデザイナー兼歯科医療専門家です。",
-    `ユーザーの指示に従い、歯科医院スタッフ向けプレゼンテーション（全12枚）のうち${range}枚目のHTMLスライド4枚を生成してください。`,
-    `【出力形式】各スライドを ===SLIDE_N===（N=${startN}〜${endN}）で区切り、その直後に <div ...>...</div> を出力してください。JSONではなくプレーンテキストで出力してください。`,
-    "画像の取り扱い:",
-    "- 参考画像: 内容生成の参考としてください",
-    "- 埋め込み画像IMAGE_N: NをそのままINDEXに使い <div data-image=\"INDEX\" style=\"position:absolute;max-width:44%;max-height:44%;overflow:hidden;\"></div> を挿入する",
-    "",
-    ...SLIDE_BATCH_BASE_LINES,
-    "",
-    "【今回生成する4枚（この順番で出力）】",
-    ...sections,
-    "※各スライドの見出しには必ず番号と項目名を含めること。",
-  ].join("\n");
-}
 
 function buildRegenBatchSysPrompt(startN: number, endN: number, totalSlides: number): string {
   const count = endN - startN + 1;
@@ -755,6 +699,8 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
     setContent(""); setSlidesHtml([]); setGeneratedTheme(""); setNotice("");
     setEditSelectedSlides([]);
     setDocMode("summary");
+    // 資料は必ずWordから作り、スライドは「スライド化」で変換する（前のスライドセッションの出力種別を持ち越さない）
+    setOutputType("word"); setGeneratedOutputType("word");
     embedCounterRef.current = 0;
     setActiveTab("chat");
   }
@@ -1198,8 +1144,9 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
           setNotice("スライドを生成中…");
           const theme = isFirstMessage ? text.slice(0, 40) : generatedTheme;
           const buildContentsOnce = buildContents(augmentedText, pendingImages, resolvedDocs);
-          const currentTotal = isFirstMessage ? 12 : slidesHtml.length;
-          const useBatch = isFirstMessage || currentTotal > 4;
+          // スライドは「スライド化」で作成済みのものを再生成する（新規は必ずWordから）
+          const currentTotal = slidesHtml.length;
+          const useBatch = currentTotal > 4;
 
           let slides: string[];
           if (useBatch) {
@@ -1207,9 +1154,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
               GEMINI_FLASH_MODEL,
               buildContentsOnce,
               currentTotal,
-              isFirstMessage
-                ? (startN, _endN) => buildInitialBatchSysPrompt(Math.floor((startN - 1) / 4))
-                : (startN, endN) => buildRegenBatchSysPrompt(startN, endN, currentTotal),
+              (startN, endN) => buildRegenBatchSysPrompt(startN, endN, currentTotal),
               setNotice
             );
           } else {
@@ -1384,7 +1329,7 @@ export function ManualGeneratorPanel({ onSwitchMode, initialSessionId }: {
       const slides = await generateSlidesStreaming(
         GEMINI_FLASH_MODEL,
         slideContents,
-        SLIDE_SYS_PROMPT,
+        SLIDE_FROM_WORD_SYS_PROMPT,
         setNotice
       );
       if (slides.length === 0) throw new Error("スライドの生成に失敗しました。再度お試しください。");
