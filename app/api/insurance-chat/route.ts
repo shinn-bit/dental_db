@@ -1,17 +1,11 @@
-import {
-  RetrieveAndGenerateCommand,
-  RetrieveCommand,
-} from "@aws-sdk/client-bedrock-agent-runtime";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
 import { NextResponse } from "next/server";
-import {
-  createBedrockAgentRuntimeClient,
-  createBedrockRuntimeClient,
-  createS3Client,
-} from "@/lib/aws";
+import { createBedrockRuntimeClient, createS3Client } from "@/lib/aws";
+import { buildHistoryMessages, type ChatHistoryItem } from "@/lib/chat-history";
 import { appEnv, requireEnv } from "@/lib/env";
+import { formatSearchResults, hybridSearch } from "@/lib/hybrid-search";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 
@@ -22,6 +16,7 @@ type InsuranceChatRequest = {
   attachments?: Attachment[];
   bedrockSessionId?: string;
   folderId?: string; // 保険フォルダのID
+  history?: ChatHistoryItem[]; // 直近の会話（今回の質問は含まない）
 };
 
 const IMAGE_FORMAT_MAP: Record<string, "jpeg" | "png" | "gif" | "webp"> = {
@@ -51,13 +46,7 @@ const INSURANCE_PROMPT = `あなたは歯科医院の保険請求専門AIアシ�
 
 ■「最適化」「追加算定」「もっと取れないか」等の相談の場合
 　▶ 追加算定の可能性：
-　　- 項目・条件・優先度
-
-検索結果:
-$search_results$
-
-質問・入力内容:
-$query$`;
+　　- 項目・条件・優先度`;
 
 async function describeImage(
   buffer: Buffer, mimeType: string, filename: string, modelArn: string
@@ -122,62 +111,56 @@ export async function POST(request: Request) {
     ? `\n\n--- 添付ファイルの内容 ---\n${attachmentParts.join("\n\n")}\n---`
     : "";
 
-  const queryText = `${message}${attachmentContext}`;
-
   // 保険フォルダのfolderIdでフィルタ（カスタムメタデータ方式）
   const retrievalFilter = body.folderId
     ? { equals: { key: "folderId", value: body.folderId } }
     : undefined;
 
   try {
-    const bedrockClient = createBedrockAgentRuntimeClient();
-
-    const [response, retrieveResponse] = await Promise.all([
-      bedrockClient.send(new RetrieveAndGenerateCommand({
-        ...(body.bedrockSessionId ? { sessionId: body.bedrockSessionId } : {}),
-        input: { text: queryText },
-        retrieveAndGenerateConfiguration: {
-          type: "KNOWLEDGE_BASE",
-          knowledgeBaseConfiguration: {
-            knowledgeBaseId,
-            modelArn,
-            retrievalConfiguration: {
-              vectorSearchConfiguration: {
-                numberOfResults: 8,
-                ...(retrievalFilter ? { filter: retrievalFilter } : {}),
-              },
-            },
-            generationConfiguration: {
-              promptTemplate: { textPromptTemplate: INSURANCE_PROMPT },
-            },
-          },
-        },
-      })),
-      bedrockClient.send(new RetrieveCommand({
-        knowledgeBaseId,
-        retrievalQuery: { text: queryText },
-        retrievalConfiguration: {
-          vectorSearchConfiguration: {
-            numberOfResults: 8,
-            ...(retrievalFilter ? { filter: retrievalFilter } : {}),
-          },
-        },
-      })).catch(() => ({ retrievalResults: [] as never[] })),
-    ]);
+    // 検索は入力文だけで行う（添付の全文を混ぜると検索がずれるため、添付は回答生成にだけ渡す）
+    const searchResults = await hybridSearch(knowledgeBaseId, message, {
+      folderId: body.folderId,
+      filter: retrievalFilter,
+    });
 
     const bucket = appEnv.s3BucketName;
-    const retrievalResults = (retrieveResponse.retrievalResults ?? []) as Array<{
-      content?: { text?: string };
-      location?: { s3Location?: { uri?: string } };
-    }>;
+    const retrievalResults = searchResults.map((r) => ({
+      content: { text: r.text },
+      location: { s3Location: { uri: r.sourceUri } },
+    }));
 
-    const images = bucket && retrievalResults.length > 0
-      ? await extractImages(retrievalResults, bucket, message).catch(() => [] as ChatImage[])
-      : [];
+    const [response, images] = await Promise.all([
+      createBedrockRuntimeClient().send(
+        new ConverseCommand({
+          modelId: modelArn,
+          system: [{ text: INSURANCE_PROMPT }],
+          messages: [
+            ...buildHistoryMessages(body.history),
+            {
+              role: "user",
+              content: [
+                {
+                  text: `検索結果:\n${formatSearchResults(searchResults)}\n\n質問・入力内容:\n${message}${attachmentContext}`,
+                },
+              ],
+            },
+          ],
+          inferenceConfig: { maxTokens: 4096 },
+        })
+      ),
+      bucket && retrievalResults.length > 0
+        ? extractImages(retrievalResults, bucket, message).catch(() => [] as ChatImage[])
+        : Promise.resolve([] as ChatImage[]),
+    ]);
+
+    const answerText = (response.output?.message?.content ?? [])
+      .map((block) => ("text" in block ? block.text ?? "" : ""))
+      .join("");
 
     return NextResponse.json({
-      answer: response.output?.text || "",
-      bedrockSessionId: response.sessionId || "",
+      answer: answerText,
+      // Bedrockセッションは使わなくなった（会話履歴は history で受け取る）。既存の保存形式との互換のため返す
+      bedrockSessionId: body.bedrockSessionId ?? "",
       images,
     });
   } catch (error) {

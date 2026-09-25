@@ -75,6 +75,12 @@ async function lexicalSearch(query: string, folderId?: string) {
   return body.results ?? [];
 }
 
+// AIに渡す検索結果の文字列。番号は利用者に見えず回答に漏れるため付けない
+export function formatSearchResults(results: HybridSearchResult[]) {
+  if (results.length === 0) return "（該当する検索結果はありません）";
+  return results.map((r) => r.text).join("\n\n---\n\n");
+}
+
 export async function hybridSearch(
   knowledgeBaseId: string,
   query: string,
