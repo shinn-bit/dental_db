@@ -1,14 +1,11 @@
-import {
-  RetrieveAndGenerateCommand,
-  RetrieveCommand,
-  type RetrievalFilter
-} from "@aws-sdk/client-bedrock-agent-runtime";
+import { type RetrievalFilter } from "@aws-sdk/client-bedrock-agent-runtime";
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { ConverseCommand } from "@aws-sdk/client-bedrock-runtime";
+import { ConverseCommand, type Message } from "@aws-sdk/client-bedrock-runtime";
 import { NextResponse } from "next/server";
-import { createBedrockAgentRuntimeClient, createBedrockRuntimeClient, createS3Client } from "@/lib/aws";
+import { createBedrockRuntimeClient, createS3Client } from "@/lib/aws";
 import { appEnv, requireEnv } from "@/lib/env";
+import { hybridSearch, type HybridSearchResult } from "@/lib/hybrid-search";
 import pdfParse from "pdf-parse";
 import mammoth from "mammoth";
 
@@ -26,7 +23,40 @@ type ChatRequest = {
   bedrockSessionId?: string;
   folderId?: string; // フォルダ選択時のフォルダID
   mode?: "rag" | "net"; // "rag"=資料のみ（デフォルト）, "net"=AIモード（資料優先+一般知識）
+  history?: Array<{ role: "user" | "assistant"; text: string }>; // 直近の会話（今回の質問は含まない）
 };
+
+const MAX_HISTORY_MESSAGES = 12;
+const MAX_HISTORY_CHARS = 2000;
+
+const RAG_ONLY_PROMPT =
+  "あなたは歯科医院の院内ナレッジだけを参照して回答するAIアシスタントです。検索結果に書かれている内容だけを根拠にしてください。一般知識、推測、外部知識、参考文献の補完は禁止です。検索結果に根拠がない場合は「選択された資料内では確認できません」とだけ明確に伝えてください。回答は現場スタッフ向けに簡潔な日本語にしてください。";
+const NET_PROMPT =
+  "あなたは歯科医院スタッフを支援するAIアシスタントです。以下の院内資料の検索結果を最優先で参照してください。検索結果に質問への回答が含まれている場合は、必ずその内容を根拠に答えてください。検索結果だけでは回答が不十分な場合は、あなたの一般的な医療・歯科知識を補足として活用して答えてください。院内資料に基づく内容と一般知識に基づく内容は明確に区別して伝えてください。回答は現場スタッフ向けに分かりやすい日本語にしてください。";
+
+// Converse は user から始まり user/assistant が交互である必要がある
+function buildHistoryMessages(history: ChatRequest["history"]): Message[] {
+  const messages: Message[] = [];
+  for (const item of (history ?? []).slice(-MAX_HISTORY_MESSAGES)) {
+    const text = item.text?.trim().slice(0, MAX_HISTORY_CHARS);
+    if (!text || (item.role !== "user" && item.role !== "assistant")) continue;
+    if (messages.length === 0 && item.role !== "user") continue;
+    const last = messages[messages.length - 1];
+    if (last && last.role === item.role) {
+      last.content = [{ text: `${last.content?.[0]?.text ?? ""}\n\n${text}` }];
+    } else {
+      messages.push({ role: item.role, content: [{ text }] });
+    }
+  }
+  // 最後は assistant で終える（直後に今回の user 質問を足すため）
+  if (messages.length > 0 && messages[messages.length - 1].role === "user") messages.pop();
+  return messages;
+}
+
+function formatSearchResults(results: HybridSearchResult[]) {
+  if (results.length === 0) return "（該当する検索結果はありません）";
+  return results.map((r, i) => `[${i + 1}]\n${r.text}`).join("\n\n");
+}
 
 type ChatSourceFile = {
   id?: string;
@@ -144,77 +174,68 @@ export async function POST(request: Request) {
 
   // フォルダ選択時はfolderIdメタデータ属性でフィルタ（カスタムメタデータ方式）
   const retrievalFilter = createFolderIdFilter(body.folderId);
-  const queryText = `${message}${attachmentContext}`;
 
   try {
-    const bedrockClient = createBedrockAgentRuntimeClient();
-
-    // 回答生成と文書検索を並列実行
-    // RetrieveAndGenerateはカスタムpromptTemplate使用時にretrievedReferencesを返さないため
-    // RetrieveCommandで別途ソース文書を取得して画像引き出しに使う
-    const [response, retrieveResponse] = await Promise.all([
-      bedrockClient.send(new RetrieveAndGenerateCommand({
-        ...(body.bedrockSessionId ? { sessionId: body.bedrockSessionId } : {}),
-        input: { text: queryText },
-        retrieveAndGenerateConfiguration: {
-          type: "KNOWLEDGE_BASE",
-          knowledgeBaseConfiguration: {
-            knowledgeBaseId,
-            modelArn,
-            retrievalConfiguration: {
-              vectorSearchConfiguration: {
-                numberOfResults: 5,
-                ...(retrievalFilter ? { filter: retrievalFilter } : {}),
-              },
-            },
-            generationConfiguration: {
-              promptTemplate: {
-                textPromptTemplate: body.mode === "net"
-                  ? "あなたは歯科医院スタッフを支援するAIアシスタントです。以下の院内資料の検索結果を最優先で参照してください。検索結果に質問への回答が含まれている場合は、必ずその内容を根拠に答えてください。検索結果だけでは回答が不十分な場合は、あなたの一般的な医療・歯科知識を補足として活用して答えてください。院内資料に基づく内容と一般知識に基づく内容は明確に区別して伝えてください。回答は現場スタッフ向けに分かりやすい日本語にしてください。\n\n院内資料の検索結果:\n$search_results$\n\n質問:\n$query$"
-                  : "あなたは歯科医院の院内ナレッジだけを参照して回答するAIアシスタントです。検索結果に書かれている内容だけを根拠にしてください。一般知識、推測、外部知識、参考文献の補完は禁止です。検索結果に根拠がない場合は「選択された資料内では確認できません」とだけ明確に伝えてください。回答は現場スタッフ向けに簡潔な日本語にしてください。\n\n検索結果:\n$search_results$\n\n質問:\n$query$",
-              },
-            },
-          },
-        },
-      })),
-      bedrockClient.send(new RetrieveCommand({
-        knowledgeBaseId,
-        retrievalQuery: { text: queryText },
-        retrievalConfiguration: {
-          vectorSearchConfiguration: {
-            numberOfResults: 5,
-            ...(retrievalFilter ? { filter: retrievalFilter } : {}),
-          },
-        },
-      })).catch(() => ({ retrievalResults: [] as never[] })),
-    ]);
+    // 検索は質問文だけで行う（添付の全文を混ぜると検索がずれるため、添付は回答生成にだけ渡す）
+    const searchResults = await hybridSearch(knowledgeBaseId, message, {
+      folderId: body.folderId,
+      filter: retrievalFilter,
+    });
 
     const bucket = appEnv.s3BucketName;
-    console.log(`[chat/images] bucket=${bucket ? "ok" : "EMPTY"} citations=${(response.citations ?? []).length}`);
-
-    const retrievalResults = (retrieveResponse.retrievalResults ?? []) as Array<{
-      content?: { text?: string };
-      location?: { s3Location?: { uri?: string } };
-    }>;
+    const retrievalResults = searchResults.map((r) => ({
+      content: { text: r.text },
+      location: { s3Location: { uri: r.sourceUri } },
+    }));
     console.log(`[chat/images] retrieveResults=${retrievalResults.length}`);
 
-    const images = bucket && retrievalResults.length > 0
-      ? await extractImagesFromRetrieveResults(retrievalResults, bucket, message).catch((err) => {
-          console.error("[chat/images] extractImagesFromRetrieveResults failed:", String(err));
-          return [] as ChatImage[];
+    // フォルダフィルタ適用かつ検索結果0件かつ資料モードの場合はガイドメッセージを返す（生成は省略）
+    if (retrievalResults.length === 0 && !!body.folderId && body.mode !== "net") {
+      return NextResponse.json({
+        answer: "選択したフォルダの資料には、ご質問に関連する内容が見つかりませんでした。「すべての資料」に切り替えてもう一度お試しください。",
+        citations: [],
+        bedrockSessionId: body.bedrockSessionId ?? "",
+        images: [],
+      });
+    }
+
+    const [response, images] = await Promise.all([
+      createBedrockRuntimeClient().send(
+        new ConverseCommand({
+          modelId: modelArn,
+          system: [{ text: body.mode === "net" ? NET_PROMPT : RAG_ONLY_PROMPT }],
+          messages: [
+            ...buildHistoryMessages(body.history),
+            {
+              role: "user",
+              content: [
+                {
+                  text: `${body.mode === "net" ? "院内資料の検索結果" : "検索結果"}:\n${formatSearchResults(searchResults)}\n\n質問:\n${message}${attachmentContext}`,
+                },
+              ],
+            },
+          ],
+          inferenceConfig: { maxTokens: 4096 },
         })
-      : [];
+      ),
+      bucket && retrievalResults.length > 0
+        ? extractImagesFromRetrieveResults(retrievalResults, bucket, message).catch((err) => {
+            console.error("[chat/images] extractImagesFromRetrieveResults failed:", String(err));
+            return [] as ChatImage[];
+          })
+        : Promise.resolve([] as ChatImage[]),
+    ]);
     console.log(`[chat/images] result: ${images.length} images`);
 
-    // フォルダフィルタ適用かつ検索結果0件かつ資料モードの場合はガイドメッセージに差し替え
-    const answerText = retrievalResults.length === 0 && !!body.folderId && body.mode !== "net"
-      ? "選択したフォルダの資料には、ご質問に関連する内容が見つかりませんでした。「すべての資料」に切り替えてもう一度お試しください。"
-      : response.output?.text || "";
+    const answerText = (response.output?.message?.content ?? [])
+      .map((block) => ("text" in block ? block.text ?? "" : ""))
+      .join("");
 
     return NextResponse.json({
       answer: answerText,
-      citations: response.citations || [],
-      bedrockSessionId: response.sessionId || "",
+      citations: [],
+      // Bedrockセッションは使わなくなった（会話履歴は history で受け取る）。既存の保存形式との互換のため返す
+      bedrockSessionId: body.bedrockSessionId ?? "",
       images,
     });
   } catch (error) {

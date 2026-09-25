@@ -304,6 +304,8 @@ export function ChatPanel({ onSwitchMode, onLoadManualSession, initialSessionId 
           ...(attachments.length > 0 ? { attachments } : {}),
           ...(bedrockSessionId ? { bedrockSessionId } : {}),
           ...(selectedFolderId ? { folderId: selectedFolderId } : {}),
+          // 直近6往復を会話履歴として送る（サーバー側でも件数・文字数を制限）
+          history: prevMessages.slice(-12).map((m) => ({ role: m.role, text: m.text })),
         }),
       });
       const data = (await res.json()) as {
